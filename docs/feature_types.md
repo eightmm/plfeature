@@ -9,7 +9,7 @@
 
 ### API
 ```python
-from featurizer import MoleculeFeaturizer
+from plfeature import MoleculeFeaturizer
 
 featurizer = MoleculeFeaturizer()
 features = featurizer.get_feature("CCO")  # Descriptors and fingerprints
@@ -32,7 +32,7 @@ node, edge = featurizer.get_graph("CCO")  # Graph representation
 
 ### API
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 
 featurizer = ProteinFeaturizer("protein.pdb")
 atom_features = featurizer.get_atom_features_with_sasa()

@@ -40,7 +40,7 @@ All atom-level methods have clear naming to distinguish from residue-level:
 Get atom-level graph representation with node and edge features, similar to residue-level format.
 
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 
 featurizer = ProteinFeaturizer("protein.pdb")
 
@@ -105,13 +105,13 @@ features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
 Can also be used without class instantiation:
 
 ```python
-from featurizer.protein_featurizer import get_protein_atom_features
+from plfeature.protein_featurizer import get_protein_atom_features
 
 # Basic features
 token, coord = get_protein_atom_features("protein.pdb")
 
 # With SASA
-from featurizer.protein_featurizer import get_protein_atom_features_with_sasa
+from plfeature.protein_featurizer import get_protein_atom_features_with_sasa
 features = get_protein_atom_features_with_sasa("protein.pdb")
 ```
 
@@ -161,7 +161,7 @@ TRP_tokens = [('TRP', atom) for atom in [
 
 ### Basic Atom-Level Analysis
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 import torch
 
 featurizer = ProteinFeaturizer("protein.pdb")
@@ -324,7 +324,7 @@ Complete mapping available in the source code:
 
 ```python
 # Access the full token dictionary
-from featurizer.protein_featurizer.atom_featurizer import AtomFeaturizer
+from plfeature.protein_featurizer.atom_featurizer import AtomFeaturizer
 
 featurizer = AtomFeaturizer()
 token_dict = featurizer.res_atm_token

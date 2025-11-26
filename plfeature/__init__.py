@@ -1,8 +1,8 @@
 """
-Featurizer Package
+plfeature Package
 
 A comprehensive Python package for extracting features from molecular and protein structures
-for machine learning applications.
+for machine learning applications and protein-ligand modeling.
 """
 
 # Import molecule featurizer components

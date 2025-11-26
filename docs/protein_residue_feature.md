@@ -5,7 +5,7 @@
 Returns node and edge features for graph neural networks.
 
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 
 featurizer = ProteinFeaturizer("protein.pdb")
 node, edge = featurizer.get_features(distance_cutoff=8.0)  # Default: 8.0 Å

@@ -68,7 +68,7 @@ The molecular featurizer extracts 40 descriptors covering physicochemical, topol
 ## Usage Example
 
 ```python
-from featurizer import MoleculeFeaturizer
+from plfeature import MoleculeFeaturizer
 
 # Initialize featurizer
 featurizer = MoleculeFeaturizer()

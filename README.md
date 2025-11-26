@@ -1,19 +1,19 @@
-# Featurizer
+# plfeature
 
-A comprehensive Python package for extracting features from both **molecules** and **proteins** for machine learning applications, with special support for graph neural networks.
+A comprehensive Python package for extracting features from both **molecules** and **proteins** for machine learning applications, with special support for graph neural networks and protein-ligand modeling.
 
 
 ## 📦 Installation
 
 ```bash
-pip install git+https://github.com/eightmm/Featurizer.git
+pip install git+https://github.com/eightmm/plfeature.git
 ```
 
 ## 🚀 Quick Start
 
 ### Molecule Features
 ```python
-from featurizer import MoleculeFeaturizer
+from plfeature import MoleculeFeaturizer
 from rdkit import Chem
 
 # From SDF file
@@ -45,7 +45,7 @@ features = featurizer.get_feature()  # Features without H atoms
 
 ### Protein Features
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 
 featurizer = ProteinFeaturizer("protein.pdb")
 
@@ -61,7 +61,7 @@ res_node, res_edge = featurizer.get_residue_features(distance_cutoff=8.0)
 
 ### PDB Standardization
 ```python
-from featurizer import PDBStandardizer
+from plfeature import PDBStandardizer
 
 # Default: Convert PTMs to base amino acids (for ESM models, MD simulation)
 standardizer = PDBStandardizer()  # ptm_handling='base_aa' (default)
@@ -80,7 +80,7 @@ standardizer = PDBStandardizer(remove_hydrogens=False)
 standardizer.standardize("messy.pdb", "clean.pdb")
 
 # Or use convenience function
-from featurizer import standardize_pdb
+from plfeature import standardize_pdb
 standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 
 # Standardization automatically:
@@ -112,7 +112,7 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 
 ### Custom SMARTS Patterns for Molecules
 ```python
-from featurizer import MoleculeFeaturizer
+from plfeature import MoleculeFeaturizer
 
 # Define custom SMARTS patterns
 custom_patterns = {
@@ -136,7 +136,7 @@ custom_feats = featurizer.get_custom_smarts_features()
 
 ### PTM (Post-Translational Modification) Handling
 ```python
-from featurizer import PDBStandardizer
+from plfeature import PDBStandardizer
 
 # Mode 1: 'base_aa' - Convert PTMs to base amino acids (DEFAULT)
 # Use for: ESM models, AlphaFold, MD simulations with standard force fields
@@ -194,7 +194,7 @@ for pdb_file in glob.glob("pdbs/*.pdb"):
 
 ### Protein Sequence Extraction
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 
 featurizer = ProteinFeaturizer("protein.pdb")
 
@@ -214,7 +214,7 @@ print(f"Full sequence: {full_sequence}")
 
 ### Contact Maps with Different Thresholds
 ```python
-from featurizer import ProteinFeaturizer
+from plfeature import ProteinFeaturizer
 
 featurizer = ProteinFeaturizer("protein.pdb")
 
@@ -231,7 +231,7 @@ adjacency = standard_contacts['adjacency_matrix']
 
 ### Batch Processing
 ```python
-from featurizer import MoleculeFeaturizer
+from plfeature import MoleculeFeaturizer
 import torch
 
 smiles_list = ["CCO", "CC(=O)O", "c1ccccc1"]
@@ -275,11 +275,11 @@ MIT License - see [LICENSE](LICENSE) file
 ## 📖 Citation
 
 ```bibtex
-@software{featurizer2025,
-  title = {Featurizer: Unified molecular and protein feature extraction},
+@software{plfeature2025,
+  title = {plfeature: Unified molecular and protein feature extraction for protein-ligand modeling},
   author = {Jaemin Sim},
   year = {2025},
-  url = {https://github.com/eightmm/Featurizer}
+  url = {https://github.com/eightmm/plfeature}
 }
 ```
 

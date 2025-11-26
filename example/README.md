@@ -1,6 +1,6 @@
-# Featurizer Examples
+# plfeature Examples
 
-This directory contains example files and usage demonstrations for the Featurizer package.
+This directory contains example files and usage demonstrations for the plfeature package.
 
 ## Files
 
@@ -28,7 +28,7 @@ The notebook demonstrates:
 ### Python Script Usage
 
 ```python
-from featurizer import PDBStandardizer, ProteinFeaturizer, MoleculeFeaturizer
+from plfeature import PDBStandardizer, ProteinFeaturizer, MoleculeFeaturizer
 
 # 1. Standardize PDB file
 standardizer = PDBStandardizer(

@@ -37,7 +37,7 @@ class ProteinFeaturizerOld:
 
     Examples:
         >>> # Basic usage
-        >>> from featurizer import ProteinFeaturizer
+        >>> from plfeature import ProteinFeaturizer
         >>> featurizer = ProteinFeaturizer()
         >>> features = featurizer.extract("protein.pdb")
 

@@ -1,5 +1,5 @@
 """
-Setup script for Featurizer package.
+Setup script for plfeature package.
 """
 
 from setuptools import setup, find_packages
@@ -11,14 +11,14 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="featurizer",
+    name="plfeature",
     version="0.1.0",
     author="Jaemin Sim",
     author_email="your.email@example.com",
-    description="A comprehensive toolkit for extracting features from molecular and protein structures",
+    description="A comprehensive toolkit for extracting features from molecular and protein structures for protein-ligand modeling",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/eightmm/featurizer",
+    url="https://github.com/eightmm/plfeature",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -38,17 +38,17 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "protein-featurizer=featurizer.protein_featurizer.main:main",
-            "pdb-standardize=featurizer.protein_featurizer.pdb_standardizer:main",
-            "extract-protein-features=featurizer.protein_featurizer.residue_featurizer:main",
-            "extract-mol-features=featurizer.molecule_featurizer.molecular_feature:main",
+            "protein-featurizer=plfeature.protein_featurizer.main:main",
+            "pdb-standardize=plfeature.protein_featurizer.pdb_standardizer:main",
+            "extract-protein-features=plfeature.protein_featurizer.residue_featurizer:main",
+            "extract-mol-features=plfeature.molecule_featurizer.molecular_feature:main",
         ],
     },
     include_package_data=True,
     zip_safe=False,
-    keywords="protein molecule pdb smiles feature-extraction bioinformatics chemistry structural-biology machine-learning drug-discovery",
+    keywords="protein-ligand molecule pdb smiles feature-extraction bioinformatics chemistry structural-biology machine-learning drug-discovery gnn",
     project_urls={
-        "Bug Reports": "https://github.com/eightmm/featurizer/issues",
-        "Source": "https://github.com/eightmm/featurizer",
+        "Bug Reports": "https://github.com/eightmm/plfeature/issues",
+        "Source": "https://github.com/eightmm/plfeature",
     },
 )

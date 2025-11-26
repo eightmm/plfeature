@@ -6,7 +6,7 @@ Extracts 40 normalized molecular descriptors.
 
 ### API
 ```python
-from featurizer import MoleculeFeaturizer
+from plfeature import MoleculeFeaturizer
 
 featurizer = MoleculeFeaturizer("CCO")
 features = featurizer.get_feature()
