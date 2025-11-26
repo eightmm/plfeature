@@ -31,14 +31,14 @@ class MoleculeGraphFeaturizer:
     This class provides methods to convert molecules into graph representations
     suitable for Graph Neural Networks (GNNs).
 
-    Node Features (147 dimensions):
+    Node Features (157 dimensions):
         - Basic atom properties (39)
         - Degree features (41)
         - Ring features (21)
         - SMARTS patterns (5)
         - Stereochemistry (8)
         - Partial charges (2)
-        - Extended neighborhood (6)
+        - Extended neighborhood (16): 1-hop & 2-hop stats including H-bond, charge, halogen
         - Physical properties (6)
         - Crippen contributions (2)
         - TPSA/ASA contributions (2)
@@ -279,22 +279,88 @@ class MoleculeGraphFeaturizer:
 
     def get_extended_neighborhood(self, mol) -> torch.Tensor:
         """
-        Compute extended neighborhood features (6 dimensions per atom).
+        Compute extended neighborhood features (16 dimensions per atom).
 
-        Features for 1-hop and 2-hop neighborhoods:
+        Features for 1-hop and 2-hop neighborhoods (8 each):
             - Neighbor count (normalized)
             - Aromatic ratio
             - Heteroatom ratio (N, O, S)
+            - H-bond donor ratio
+            - H-bond acceptor ratio
+            - Mean partial charge
+            - Ring atom ratio
+            - Halogen ratio (F, Cl, Br, I)
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 6)
+        features = torch.zeros(num_atoms, 16)
         hetero_symbols = {'N', 'O', 'S'}
+        halogen_symbols = {'F', 'Cl', 'Br', 'I'}
+
+        # Precompute partial charges
+        try:
+            rdPartialCharges.ComputeGasteigerCharges(mol)
+            charges = {}
+            for atom in mol.GetAtoms():
+                charge = atom.GetDoubleProp('_GasteigerCharge')
+                if np.isnan(charge) or np.isinf(charge):
+                    charge = 0.0
+                charges[atom.GetIdx()] = max(-1.0, min(1.0, charge))
+        except:
+            charges = {atom.GetIdx(): 0.0 for atom in mol.GetAtoms()}
+
+        def compute_hop_features(neighbors: list) -> list:
+            """Compute 8 features for a set of neighbors."""
+            if not neighbors:
+                return [0.0] * 8
+
+            n = len(neighbors)
+
+            # 1. Count (normalized)
+            count_norm = min(n / 6.0, 1.0) if n <= 6 else min(n / 20.0, 1.0)
+
+            # 2. Aromatic ratio
+            aromatic_ratio = sum(a.GetIsAromatic() for a in neighbors) / n
+
+            # 3. Heteroatom ratio (N, O, S)
+            hetero_ratio = sum(1 for a in neighbors if a.GetSymbol() in hetero_symbols) / n
+
+            # 4. H-bond donor ratio (N-H, O-H)
+            h_donor_count = 0
+            for a in neighbors:
+                symbol = a.GetSymbol()
+                if symbol in ('N', 'O') and a.GetTotalNumHs() > 0:
+                    h_donor_count += 1
+            h_donor_ratio = h_donor_count / n
+
+            # 5. H-bond acceptor ratio (N, O with lone pairs)
+            h_acceptor_count = 0
+            for a in neighbors:
+                symbol = a.GetSymbol()
+                if symbol == 'N' and a.GetDegree() < 4:  # N with lone pair
+                    h_acceptor_count += 1
+                elif symbol == 'O':  # O always has lone pairs
+                    h_acceptor_count += 1
+            h_acceptor_ratio = h_acceptor_count / n
+
+            # 6. Mean partial charge (normalized to [0, 1])
+            neighbor_charges = [charges.get(a.GetIdx(), 0.0) for a in neighbors]
+            mean_charge = sum(neighbor_charges) / n
+            mean_charge_norm = (mean_charge + 1.0) / 2.0  # [-1, 1] -> [0, 1]
+
+            # 7. Ring atom ratio
+            ring_ratio = sum(a.IsInRing() for a in neighbors) / n
+
+            # 8. Halogen ratio (F, Cl, Br, I)
+            halogen_ratio = sum(1 for a in neighbors if a.GetSymbol() in halogen_symbols) / n
+
+            return [count_norm, aromatic_ratio, hetero_ratio, h_donor_ratio,
+                    h_acceptor_ratio, mean_charge_norm, ring_ratio, halogen_ratio]
 
         for atom in mol.GetAtoms():
             idx = atom.GetIdx()
             neighbors_1 = list(atom.GetNeighbors())
 
-            # 2-hop neighbors
+            # 2-hop neighbors (excluding self)
             neighbors_2 = set()
             for n1 in neighbors_1:
                 for n2 in n1.GetNeighbors():
@@ -302,19 +368,13 @@ class MoleculeGraphFeaturizer:
                         neighbors_2.add(n2)
             neighbors_2 = list(neighbors_2)
 
-            # 1-hop features
-            if neighbors_1:
-                n = len(neighbors_1)
-                features[idx, 0] = min(n / 6.0, 1.0)
-                features[idx, 1] = sum(a.GetIsAromatic() for a in neighbors_1) / n
-                features[idx, 2] = sum(1 for a in neighbors_1 if a.GetSymbol() in hetero_symbols) / n
+            # 1-hop features (0-7)
+            hop1_feats = compute_hop_features(neighbors_1)
+            features[idx, 0:8] = torch.tensor(hop1_feats)
 
-            # 2-hop features
-            if neighbors_2:
-                n = len(neighbors_2)
-                features[idx, 3] = min(n / 20.0, 1.0)
-                features[idx, 4] = sum(a.GetIsAromatic() for a in neighbors_2) / n
-                features[idx, 5] = sum(1 for a in neighbors_2 if a.GetSymbol() in hetero_symbols) / n
+            # 2-hop features (8-15)
+            hop2_feats = compute_hop_features(neighbors_2)
+            features[idx, 8:16] = torch.tensor(hop2_feats)
 
         return features
 

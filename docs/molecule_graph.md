@@ -5,7 +5,7 @@
 Graph representations of molecules for Graph Neural Networks (GNNs). This module converts molecular structures into graph format with comprehensive node (atom) and edge (bond) features.
 
 **Feature Dimensions:**
-- Node Features: **147 dimensions**
+- Node Features: **157 dimensions**
 - Edge Features: **66 dimensions**
 
 ## Quick Start
@@ -20,7 +20,7 @@ featurizer = MoleculeFeaturizer()
 node, edge, adj = featurizer.get_graph("CCO")
 
 # Access features
-node_features = node['node_feats']  # [n_atoms, 147]
+node_features = node['node_feats']  # [n_atoms, 157]
 edge_features = edge['edge_feats']  # [n_edges, 66]
 coordinates = node['coords']        # [n_atoms, 3]
 edge_indices = edge['edges']        # [2, n_edges]
@@ -31,9 +31,9 @@ node, edge, adj = featurizer.get_graph("CCO", add_hs=False)
 
 ---
 
-# Node Features (147 dimensions)
+# Node Features (157 dimensions)
 
-Total 147 dimensions organized into 13 categories.
+Total 157 dimensions organized into 13 categories.
 
 ## Summary Table
 
@@ -45,7 +45,7 @@ Total 147 dimensions organized into 13 categories.
 | SMARTS Features | 5 | Chemical pattern matching |
 | Stereochemistry | 8 | Chirality and geometry |
 | Partial Charges | 2 | Gasteiger charges |
-| Extended Neighborhood | 6 | 1-hop and 2-hop neighbor statistics |
+| Extended Neighborhood | 16 | 1-hop and 2-hop neighbor statistics (PLI-focused) |
 | Physical Properties | 6 | Atomic radii, IE, polarizability |
 | Crippen Contributions | 2 | logP and MR per atom |
 | TPSA Contribution | 1 | Polar surface area |
@@ -53,7 +53,7 @@ Total 147 dimensions organized into 13 categories.
 | Topological Features | 5 | Graph centrality measures |
 | Extended Neighbor Stats | 6 | Neighbor property statistics |
 | Extended Ring Features | 4 | Advanced ring topology |
-| **Total** | **147** | |
+| **Total** | **157** | |
 
 ---
 
@@ -234,24 +234,67 @@ Gasteiger assigns partial charges based on electronegativity
 
 ---
 
-## 7. Extended Neighborhood (6 dimensions)
+## 7. Extended Neighborhood (16 dimensions)
 
-Statistics about 1-hop and 2-hop neighbors.
+Statistics about 1-hop and 2-hop neighbors, designed for protein-ligand interaction (PLI) prediction.
 
-| Feature | Description | Normalization |
-|---------|-------------|---------------|
-| 1-hop Count | Number of direct neighbors | / 6.0 |
-| 1-hop Aromatic Ratio | Fraction of aromatic neighbors | [0, 1] |
-| 1-hop Hetero Ratio | Fraction of N/O/S neighbors | [0, 1] |
-| 2-hop Count | Number of 2-hop neighbors | / 20.0 |
-| 2-hop Aromatic Ratio | Fraction aromatic in 2-hop shell | [0, 1] |
-| 2-hop Hetero Ratio | Fraction N/O/S in 2-hop shell | [0, 1] |
+### 1-hop Features (8 dimensions)
 
-**Example - Aniline (C6H5-NH2):**
+| Index | Feature | Description | Normalization |
+|-------|---------|-------------|---------------|
+| 0 | Count | Number of direct neighbors | / 6.0, clipped to 1.0 |
+| 1 | Aromatic Ratio | Fraction of aromatic neighbors | [0, 1] |
+| 2 | Hetero Ratio | Fraction of N/O/S neighbors | [0, 1] |
+| 3 | H-Donor Ratio | Fraction of H-bond donors (N-H, O-H) | [0, 1] |
+| 4 | H-Acceptor Ratio | Fraction of H-bond acceptors (N, O) | [0, 1] |
+| 5 | Mean Partial Charge | Average Gasteiger charge | (charge + 1) / 2 |
+| 6 | Ring Atom Ratio | Fraction of ring atoms | [0, 1] |
+| 7 | Halogen Ratio | Fraction of F/Cl/Br/I neighbors | [0, 1] |
+
+### 2-hop Features (8 dimensions)
+
+| Index | Feature | Description | Normalization |
+|-------|---------|-------------|---------------|
+| 8 | Count | Number of 2-hop neighbors | / 20.0, clipped to 1.0 |
+| 9 | Aromatic Ratio | Fraction aromatic in 2-hop shell | [0, 1] |
+| 10 | Hetero Ratio | Fraction N/O/S in 2-hop shell | [0, 1] |
+| 11 | H-Donor Ratio | Fraction of H-bond donors | [0, 1] |
+| 12 | H-Acceptor Ratio | Fraction of H-bond acceptors | [0, 1] |
+| 13 | Mean Partial Charge | Average charge in 2-hop shell | (charge + 1) / 2 |
+| 14 | Ring Atom Ratio | Fraction of ring atoms | [0, 1] |
+| 15 | Halogen Ratio | Fraction of halogens | [0, 1] |
+
+### PLI Relevance
+
+These features are specifically designed for protein-ligand binding prediction:
+
+| Feature | PLI Significance |
+|---------|-----------------|
+| H-Donor/Acceptor | Critical for H-bond interactions with protein backbone/sidechains |
+| Mean Partial Charge | Electrostatic complementarity with binding site |
+| Ring Atom Ratio | π-stacking and hydrophobic interactions |
+| Halogen Ratio | Halogen bonding (emerging importance in drug design) |
+
+**Example - Aspirin (CC(=O)Oc1ccccc1C(=O)O):**
 ```
-N atom:
-  1-hop: 1 C (aromatic) → aromatic_ratio=1.0, hetero_ratio=0.0
-  2-hop: 2 C (aromatic) → aromatic_ratio=1.0
+Carbonyl O (C=O):
+  1-hop: C neighbor
+    h_acceptor_ratio = 0.0 (C is not acceptor)
+    ring_ratio = 0.0 or 1.0 (depends on which carbonyl)
+  2-hop: More diverse environment
+    aromatic_ratio = high (benzene ring nearby)
+
+Carboxylic OH:
+  1-hop: C neighbor
+    h_donor_ratio = 0.0 (neighbor C has no H)
+  Note: The O itself would be counted in its neighbors' features
+```
+
+**Example - Halogenated compound (FC(F)(F)c1ccc(Cl)cc1Br):**
+```
+Central C (CF3):
+  1-hop: 3 F atoms → halogen_ratio = 0.75
+  2-hop: benzene C atoms → halogen_ratio ≈ 0.33 (Cl, Br in 2-hop)
 ```
 
 ---
