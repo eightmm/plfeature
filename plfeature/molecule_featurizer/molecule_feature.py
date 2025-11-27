@@ -6,7 +6,7 @@ and graph-level features (node and edge features) from RDKit mol objects or SMIL
 """
 
 import warnings
-from typing import Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -26,21 +26,96 @@ from .graph_featurizer import MoleculeGraphFeaturizer
 
 class MoleculeFeaturizer:
     """
-    Unified molecule featurizer for extracting molecular features and graph representations.
+    Unified molecule featurizer with efficient caching.
 
-    This class provides methods to extract both molecular-level features (descriptors
-    and fingerprints) and graph-level features (node and edge features) from RDKit
-    mol objects or SMILES strings.
+    Supports two usage patterns:
 
-    Example:
+    1. Object-oriented (recommended for repeated access):
+        >>> featurizer = MoleculeFeaturizer("CCO")
+        >>> features = featurizer.get_feature()
+        >>> node, edge, adj = featurizer.get_graph()
+
+    2. Functional (for one-off extraction):
         >>> featurizer = MoleculeFeaturizer()
-        >>> features = featurizer.get_feature("CCO")  # Molecular descriptors
-        >>> node, edge, adj = featurizer.get_graph("CCO")  # Graph features
+        >>> features = featurizer.get_feature("CCO")
+        >>> node, edge, adj = featurizer.get_graph("CCO")
+
+    Examples:
+        >>> # From SMILES
+        >>> featurizer = MoleculeFeaturizer("CCO")
+        >>> features = featurizer.get_feature()
+        >>> descriptors = featurizer.get_descriptors()
+        >>>
+        >>> # From RDKit mol
+        >>> mol = Chem.MolFromSmiles("CCO")
+        >>> featurizer = MoleculeFeaturizer(mol)
+        >>>
+        >>> # From SDF file
+        >>> suppl = Chem.SDMolSupplier('molecules.sdf')
+        >>> for mol in suppl:
+        >>>     featurizer = MoleculeFeaturizer(mol)
+        >>>     features = featurizer.get_feature()
     """
 
-    def __init__(self):
-        """Initialize the molecule featurizer."""
+    def __init__(
+        self,
+        mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
+        hydrogen: bool = True,
+        custom_smarts: Optional[Dict[str, str]] = None,
+    ):
+        """
+        Initialize the molecule featurizer.
+
+        Args:
+            mol_or_smiles: Optional molecule (RDKit mol or SMILES string).
+                          If provided, enables object-oriented usage with caching.
+                          If None, use functional API by passing molecule to methods.
+            hydrogen: Whether to add hydrogens to molecules (default: True)
+            custom_smarts: Optional dictionary of custom SMARTS patterns
+                          e.g., {'aromatic_nitrogen': 'n', 'carboxyl': 'C(=O)O'}
+
+        Raises:
+            ValueError: If molecule cannot be parsed
+        """
         self._graph_featurizer = MoleculeGraphFeaturizer()
+        self.hydrogen = hydrogen
+        self.custom_smarts = custom_smarts or {}
+        self._cache: Dict[str, Any] = {}
+
+        # Object-oriented mode: initialize with molecule
+        self._mol: Optional[Chem.Mol] = None
+        self.input_smiles: Optional[str] = None
+        self.input_mol: Optional[Chem.Mol] = None
+        self.num_atoms: int = 0
+        self.num_bonds: int = 0
+        self.num_rings: int = 0
+        self.has_3d: bool = False
+
+        if mol_or_smiles is not None:
+            self._init_molecule(mol_or_smiles)
+
+    def _init_molecule(self, mol_or_smiles: Union[str, Chem.Mol]) -> None:
+        """Initialize with a specific molecule for object-oriented usage."""
+        # Store input for reference
+        if isinstance(mol_or_smiles, str):
+            self.input_smiles = mol_or_smiles
+            self.input_mol = Chem.MolFromSmiles(mol_or_smiles)
+            if self.input_mol is None:
+                raise ValueError(f"Invalid SMILES: {mol_or_smiles}")
+        else:
+            self.input_mol = mol_or_smiles
+            self.input_smiles = Chem.MolToSmiles(mol_or_smiles) if mol_or_smiles else None
+
+        # Prepare molecule (add hydrogens if requested)
+        self._mol = self._prepare_mol(self.input_mol, self.hydrogen)
+        if self._mol is None:
+            raise ValueError(f"Failed to prepare molecule: {mol_or_smiles}")
+
+        # Cache basic info
+        self.num_atoms = self._mol.GetNumAtoms()
+        self.num_bonds = self._mol.GetNumBonds()
+        self.num_rings = self._mol.GetRingInfo().NumRings()
+        self.has_3d = self._mol.GetNumConformers() > 0
 
     # =========================================================================
     # Molecule Preparation
@@ -288,16 +363,59 @@ class MoleculeFeaturizer:
         return fingerprints
 
     # =========================================================================
+    # Custom SMARTS Features
+    # =========================================================================
+
+    def _get_custom_smarts_features(self, mol: Chem.Mol) -> Optional[torch.Tensor]:
+        """
+        Compute custom SMARTS pattern matches for each atom.
+
+        Returns:
+            torch.Tensor or None: Binary features [n_atoms, n_patterns] if patterns provided
+        """
+        if not self.custom_smarts:
+            return None
+
+        num_atoms = mol.GetNumAtoms()
+        num_patterns = len(self.custom_smarts)
+        features = torch.zeros(num_atoms, num_patterns)
+
+        for idx, (name, pattern) in enumerate(self.custom_smarts.items()):
+            try:
+                # Parse SMARTS pattern
+                smart_mol = Chem.MolFromSmarts(pattern)
+                if smart_mol is None:
+                    print(f"Warning: Invalid SMARTS pattern for '{name}': {pattern}")
+                    continue
+
+                # Find matches
+                matches = mol.GetSubstructMatches(smart_mol)
+
+                # Mark matched atoms
+                for match in matches:
+                    for atom_idx in match:
+                        if atom_idx < num_atoms:
+                            features[atom_idx, idx] = 1.0
+
+            except Exception as e:
+                print(f"Warning: Error processing SMARTS pattern '{name}': {e}")
+
+        return features
+
+    # =========================================================================
     # Main Feature Extraction Methods
     # =========================================================================
 
-    def get_feature(self, mol_or_smiles: Union[str, Chem.Mol], add_hs: bool = True) -> Dict:
+    def get_feature(
+        self, mol_or_smiles: Optional[Union[str, Chem.Mol]] = None, add_hs: bool = True
+    ) -> Dict:
         """
         Extract all molecular-level features including descriptors and fingerprints.
 
         Args:
-            mol_or_smiles: RDKit mol object or SMILES string
-            add_hs: Whether to add hydrogens
+            mol_or_smiles: RDKit mol object or SMILES string.
+                          If None, uses the molecule set during initialization.
+            add_hs: Whether to add hydrogens (ignored if using cached molecule)
 
         Returns:
             Dictionary containing:
@@ -311,8 +429,20 @@ class MoleculeFeaturizer:
                 - topological_torsion: Topological torsion fingerprint [2048]
                 - pharmacophore2d: 2D pharmacophore fingerprint [1024]
         """
-        mol = self._prepare_mol(mol_or_smiles, add_hs)
+        # Object-oriented mode with caching
+        if mol_or_smiles is None:
+            if self._mol is None:
+                raise ValueError("No molecule provided. Either initialize with a molecule or pass one to this method.")
+            if 'features' not in self._cache:
+                self._cache['features'] = self._compute_features(self._mol)
+            return self._cache['features']
 
+        # Functional mode (no caching)
+        mol = self._prepare_mol(mol_or_smiles, add_hs)
+        return self._compute_features(mol)
+
+    def _compute_features(self, mol: Chem.Mol) -> Dict:
+        """Compute all features for a prepared molecule."""
         physicochemical = self.get_physicochemical_features(mol)
         druglike = self.get_druglike_features(mol)
         structural = self.get_structural_features(mol)
@@ -356,20 +486,190 @@ class MoleculeFeaturizer:
         }
 
     def get_graph(
-        self, mol_or_smiles: Union[str, Chem.Mol], add_hs: bool = True
+        self,
+        mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
+        add_hs: bool = True,
+        distance_cutoff: Optional[float] = None,
+        include_custom_smarts: bool = True,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         Create molecular graph with node and edge features.
 
         Args:
-            mol_or_smiles: RDKit mol object or SMILES string
-            add_hs: Whether to add hydrogens
+            mol_or_smiles: RDKit mol object or SMILES string.
+                          If None, uses the molecule set during initialization.
+            add_hs: Whether to add hydrogens (ignored if using cached molecule)
+            distance_cutoff: Optional distance cutoff for edges (if 3D available)
+                           If None, uses bond connectivity
+            include_custom_smarts: Whether to include custom SMARTS features in node features
 
         Returns:
             Tuple of (node_dict, edge_dict, adjacency_matrix):
-                - node_dict: {'node_feats': [N, 147], 'coords': [N, 3]}
+                - node_dict: {'node_feats': [N, 157], 'coords': [N, 3]}
                 - edge_dict: {'edges': [2, E], 'edge_feats': [E, 66]}
                 - adjacency_matrix: [N, N, 66]
         """
+        # Object-oriented mode with caching
+        if mol_or_smiles is None:
+            if self._mol is None:
+                raise ValueError("No molecule provided. Either initialize with a molecule or pass one to this method.")
+
+            cache_key = f'graph_{distance_cutoff}_{include_custom_smarts}'
+            if cache_key not in self._cache:
+                self._cache[cache_key] = self._compute_graph(
+                    self._mol, distance_cutoff, include_custom_smarts
+                )
+            return self._cache[cache_key]
+
+        # Functional mode (no caching)
         mol = self._prepare_mol(mol_or_smiles, add_hs)
-        return self._graph_featurizer.featurize(mol)
+        return self._compute_graph(mol, distance_cutoff, include_custom_smarts)
+
+    def _compute_graph(
+        self,
+        mol: Chem.Mol,
+        distance_cutoff: Optional[float] = None,
+        include_custom_smarts: bool = True,
+    ) -> Tuple[Dict, Dict, torch.Tensor]:
+        """Compute graph representation for a prepared molecule."""
+        node, edge, adj = self._graph_featurizer.featurize(mol)
+
+        # Add custom SMARTS features if requested
+        if include_custom_smarts and self.custom_smarts:
+            custom_features = self._get_custom_smarts_features(mol)
+            if custom_features is not None:
+                original_feats = node['node_feats']
+                node['node_feats'] = torch.cat([original_feats, custom_features], dim=1)
+
+        # If distance cutoff specified and 3D coords available, filter edges
+        has_3d = mol.GetNumConformers() > 0
+        if distance_cutoff is not None and has_3d and 'coords' in node:
+            from scipy.spatial import distance_matrix
+
+            coords = node['coords'].numpy()
+            dist_matrix = distance_matrix(coords, coords)
+
+            # Create edges based on distance cutoff
+            edges_array = np.where((dist_matrix < distance_cutoff) & (dist_matrix > 0))
+
+            # Update edge information
+            edge['edges'] = torch.tensor([edges_array[0], edges_array[1]])
+            edge['distance_cutoff'] = distance_cutoff
+
+        return node, edge, adj
+
+    # =========================================================================
+    # Convenience Methods (Object-Oriented API)
+    # =========================================================================
+
+    def get_descriptors(self) -> torch.Tensor:
+        """
+        Get only molecular descriptors (requires molecule initialization).
+
+        Returns:
+            torch.Tensor: 40 normalized molecular descriptors
+        """
+        features = self.get_feature()
+        return features['descriptor']
+
+    def get_morgan_fingerprint(self, radius: int = 2, n_bits: int = 2048) -> torch.Tensor:
+        """
+        Get Morgan fingerprint (requires molecule initialization).
+
+        Args:
+            radius: Radius for Morgan fingerprint (currently uses default 2)
+            n_bits: Number of bits (currently uses default 2048)
+
+        Returns:
+            torch.Tensor: Morgan fingerprint
+        """
+        features = self.get_feature()
+        return features['morgan']
+
+    def get_custom_smarts_features(self) -> Optional[Dict[str, Any]]:
+        """
+        Get custom SMARTS pattern matches for each atom.
+
+        Returns:
+            Dictionary with 'features' tensor and 'names' list, or None if no patterns
+        """
+        if not self.custom_smarts:
+            return None
+
+        if self._mol is None:
+            raise ValueError("No molecule set. Initialize with a molecule first.")
+
+        cache_key = 'custom_smarts_result'
+        if cache_key not in self._cache:
+            features = self._get_custom_smarts_features(self._mol)
+            if features is None:
+                self._cache[cache_key] = None
+            else:
+                self._cache[cache_key] = {
+                    'features': features,
+                    'names': list(self.custom_smarts.keys()),
+                    'patterns': self.custom_smarts
+                }
+        return self._cache[cache_key]
+
+    def get_3d_coordinates(self) -> Optional[torch.Tensor]:
+        """
+        Get 3D coordinates if available (requires molecule initialization).
+
+        Returns:
+            torch.Tensor or None: 3D coordinates [n_atoms, 3]
+        """
+        if self._mol is None:
+            raise ValueError("No molecule set. Initialize with a molecule first.")
+
+        if not self.has_3d:
+            return None
+
+        node, _, _ = self.get_graph()
+        return node.get('coords', None)
+
+    def get_all_features(self, save_to: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get all features at once (requires molecule initialization).
+
+        Args:
+            save_to: Optional path to save features
+
+        Returns:
+            Dictionary containing all features and metadata
+        """
+        if self._mol is None:
+            raise ValueError("No molecule set. Initialize with a molecule first.")
+
+        features = self.get_feature()
+        node, edge, adj = self.get_graph()
+
+        all_features = {
+            'descriptors': features['descriptor'],
+            'fingerprints': {k: v for k, v in features.items() if k != 'descriptor'},
+            'graph': {'node': node, 'edge': edge, 'adj': adj},
+            'metadata': {
+                'input_smiles': self.input_smiles,
+                'num_atoms': self.num_atoms,
+                'num_bonds': self.num_bonds,
+                'num_rings': self.num_rings,
+                'has_3d': self.has_3d,
+                'hydrogens_added': self.hydrogen
+            }
+        }
+
+        if save_to:
+            torch.save(all_features, save_to)
+
+        return all_features
+
+    # Aliases for consistency
+    extract = get_all_features
+    get_features = get_feature
+
+    def __repr__(self) -> str:
+        """String representation."""
+        if self._mol is not None:
+            return (f"MoleculeFeaturizer(smiles='{self.input_smiles}', "
+                    f"atoms={self.num_atoms}, bonds={self.num_bonds})")
+        return "MoleculeFeaturizer(no molecule set)"

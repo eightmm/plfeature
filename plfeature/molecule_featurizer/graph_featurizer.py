@@ -12,9 +12,9 @@ from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors, rdPartialCharges, AllChem
 from typing import Dict, Tuple
 
-from .constants import (
+from ..constants import (
     ATOM_TYPES, PERIODS, GROUPS, DEGREES, HEAVY_DEGREES, VALENCES,
-    TOTAL_HS, HYBRIDIZATIONS, BOND_TYPES, BOND_STEREOS, BOND_DIRS,
+    TOTAL_HS, HYBRIDIZATION_TYPES as HYBRIDIZATIONS, BOND_TYPES, BOND_STEREOS, BOND_DIRS,
     PERIODIC_TABLE, ELECTRONEGATIVITY,
     VDW_RADIUS, COVALENT_RADIUS, IONIZATION_ENERGY, POLARIZABILITY, VALENCE_ELECTRONS,
     CHEMICAL_SMARTS, ROTATABLE_BOND_SMARTS,
@@ -727,7 +727,7 @@ class MoleculeGraphFeaturizer:
 
         Returns:
             Tuple of (node_features, coordinates)
-            - node_features: [num_atoms, 147]
+            - node_features: [num_atoms, 157]
             - coordinates: [num_atoms, 3]
         """
         atom_rings, _ = self.get_ring_info(mol)
@@ -1074,7 +1074,7 @@ class MoleculeGraphFeaturizer:
 
         Returns:
             Tuple of (node_dict, edge_dict, adjacency_matrix):
-            - node_dict: {'node_feats': [N, 147], 'coords': [N, 3]}
+            - node_dict: {'node_feats': [N, 157], 'coords': [N, 3]}
             - edge_dict: {'edges': [2, E], 'edge_feats': [E, 66]}
             - adjacency_matrix: [N, N, 66]
         """

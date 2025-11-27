@@ -13,8 +13,28 @@ from .protein_featurizer import (
     ProteinFeaturizer,
     PDBStandardizer,
     ResidueFeaturizer,
+    HierarchicalFeaturizer,
+    HierarchicalProteinData,
     standardize_pdb,
+    extract_hierarchical_features,
 )
+
+# Import interaction featurizer components
+from .interaction_featurizer import PLInteractionFeaturizer
+
+# Import ESM featurizer (lazy import to avoid dependency issues)
+def get_esm_featurizer():
+    """Get ESMFeaturizer class (lazy import)."""
+    from .protein_featurizer.esm_featurizer import ESMFeaturizer
+    return ESMFeaturizer
+
+def get_dual_esm_featurizer():
+    """Get DualESMFeaturizer class (lazy import)."""
+    from .protein_featurizer.esm_featurizer import DualESMFeaturizer
+    return DualESMFeaturizer
+
+# Import constants module
+from . import constants
 
 __version__ = "0.1.0"
 __author__ = "Jaemin Sim"
@@ -27,7 +47,17 @@ __all__ = [
     "ProteinFeaturizer",
     "PDBStandardizer",
     "ResidueFeaturizer",
+    "HierarchicalFeaturizer",
+    "HierarchicalProteinData",
     "standardize_pdb",
+    "extract_hierarchical_features",
+    # ESM features
+    "get_esm_featurizer",
+    "get_dual_esm_featurizer",
+    # Interaction features
+    "PLInteractionFeaturizer",
+    # Constants
+    "constants",
 ]
 
 # Convenience functions for quick access

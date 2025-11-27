@@ -685,7 +685,7 @@ featurizer = MoleculeFeaturizer()
 # Single molecule
 node, edge, adj = featurizer.get_graph("CCO")
 data = Data(
-    x=node['node_feats'],        # [N, 147]
+    x=node['node_feats'],        # [N, 157]
     edge_index=edge['edges'],    # [2, E]
     edge_attr=edge['edge_feats'], # [E, 66]
     pos=node['coords']           # [N, 3]

@@ -36,7 +36,7 @@ custom_patterns = {
 }
 featurizer = MoleculeFeaturizer("c1ccncc1CCO", custom_smarts=custom_patterns)
 node, edge, adj = featurizer.get_graph()
-# node['node_feats'] now has 122 + 3 dimensions (base features + custom patterns)
+# node['node_feats'] now has 157 + 3 dimensions (base features + custom patterns)
 
 # Without hydrogens
 featurizer = MoleculeFeaturizer("c1ccncc1CCO", hydrogen=False)
@@ -57,6 +57,67 @@ atom_node, atom_edge = featurizer.get_atom_features(distance_cutoff=4.0)
 
 # Residue-level features (node/edge format)
 res_node, res_edge = featurizer.get_residue_features(distance_cutoff=8.0)
+```
+
+### Hierarchical Features with ESM Embeddings
+```python
+from plfeature.protein_featurizer import HierarchicalFeaturizer
+
+# Initialize (loads ESMC + ESM3 models)
+featurizer = HierarchicalFeaturizer()
+
+# Extract all features
+data = featurizer.featurize("protein.pdb")
+
+# Atom-level (one-hot encoded)
+atom_tokens = data.atom_tokens           # [N_atom, 187]
+atom_elements = data.atom_elements       # [N_atom, 8]
+atom_coords = data.atom_coords           # [N_atom, 3]
+
+# Residue-level
+residue_features = data.residue_features        # [N_res, 76]
+residue_vectors = data.residue_vector_features  # [N_res, 31, 3]
+
+# ESM embeddings (6 tensors)
+esmc_emb = data.esmc_embeddings   # [N_res, 1152]
+esmc_bos = data.esmc_bos          # [1152]
+esmc_eos = data.esmc_eos          # [1152]
+esm3_emb = data.esm3_embeddings   # [N_res, 1536]
+esm3_bos = data.esm3_bos          # [1536]
+esm3_eos = data.esm3_eos          # [1536]
+
+# Atom-residue mapping for pooling
+atom_to_residue = data.atom_to_residue  # [N_atom]
+
+# Select subset of residues (e.g., binding pocket)
+pocket = data.select_residues([10, 11, 12, 45, 46])
+```
+
+### Interaction Features (PLI)
+```python
+from plfeature import InteractionFeaturizer
+
+# SMARTS-based pharmacophore detection for protein-ligand interactions
+featurizer = InteractionFeaturizer("CC(=O)Oc1ccccc1C(=O)O")  # Aspirin
+
+# Get pharmacophore counts
+counts = featurizer.get_pharmacophore_counts()
+# {'hbond_donor': 1, 'hbond_acceptor': 5, 'aromatic': 7, ...}
+
+# Get atom-level pharmacophore labels (9 categories)
+atom_labels = featurizer.get_atom_pharmacophore_labels()  # [n_atoms, 9]
+
+# Get comprehensive interaction features
+features = featurizer.get_interaction_features()
+# Includes: pharmacophore_counts, atom_features, summary
+
+# Get interaction potential for each atom
+atom_features = featurizer.get_atom_interaction_features()
+# interaction_potential: [n_atoms, 7] - H-bond, salt bridge, pi-stack, etc.
+
+# With custom SMARTS patterns
+custom = {'my_warhead': '[CX3](=[OX1])[Cl,Br,I]'}
+featurizer = InteractionFeaturizer("CC(=O)Cl", custom_smarts=custom)
 ```
 
 ### PDB Standardization
@@ -98,11 +159,21 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 ### Molecules
 - **Descriptors**: 40 normalized molecular properties → [Details](docs/molecular_descriptors.md)
 - **Fingerprints**: 9 types including Morgan, MACCS, RDKit → [Details](docs/molecule_feature.md)
-- **Graph Features**: 122D atom features, 44D bond features → [Details](docs/molecule_graph.md)
+- **Graph Features**: 157D atom features, 66D bond features → [Details](docs/molecule_graph.md)
+
+### Interactions (PLI)
+- **Pharmacophore Types**: 9 categories (H-bond donor/acceptor, charged, aromatic, hydrophobic, halogen, metal)
+- **Atom-Level Features**: Per-atom pharmacophore labels and interaction potential
+- **63 SMARTS Patterns**: Comprehensive functional group detection
+- **3D Support**: Pharmacophore point coordinates when 3D structure available
 
 ### Proteins
-- **Atom Features**: 175 token types with atomic SASA → [Details](docs/protein_atom_feature.md)
+- **Atom Features**: 187 token types with atomic SASA → [Details](docs/protein_atom_feature.md)
 - **Residue Features**: Geometry, SASA, contacts, secondary structure → [Details](docs/protein_residue_feature.md)
+- **Hierarchical Features**: Atom-residue attention with ESM embeddings → [Details](docs/hierarchical_featurizer.md)
+  - Atom-level: 187 tokens (one-hot), 8 elements, 22 residue types
+  - Residue-level: 76-dim scalar + 31x3 vector features
+  - ESM embeddings: ESMC (1152-dim) + ESM3 (1536-dim) with BOS/EOS tokens
 - **Graph Representations**: Both atom and residue-level networks
 - **Standardization**: Flexible PTM handling with 3 modes (base_aa, preserve, remove)
   - Supports 15+ PTM types: phosphorylation (SEP, TPO, PTR), selenomethionine (MSE), methylation (MLY, M3L), acetylation (ALY), hydroxylation (HYP), and more
@@ -127,7 +198,7 @@ featurizer = MoleculeFeaturizer("c1ccncc1CCO", hydrogen=False, custom_smarts=cus
 
 # Get graph with custom features automatically included
 node, edge, adj = featurizer.get_graph()
-# node['node_feats'] is now 122 + n_patterns dimensions
+# node['node_feats'] is now 157 + n_patterns dimensions
 
 # If you need to check patterns separately
 custom_feats = featurizer.get_custom_smarts_features()
@@ -266,6 +337,7 @@ python test_ptm_handling.py     # Test PTM handling modes (base_aa, preserve, re
 - **[Molecule Graph Features](docs/molecule_graph.md)** - Graph representations for molecules
 - **[Protein Residue Features](docs/protein_residue_feature.md)** - Residue-level features guide
 - **[Protein Atom Features](docs/protein_atom_feature.md)** - Atom-level features guide
+- **[Hierarchical Featurizer with ESM](docs/hierarchical_featurizer.md)** - ESM embeddings for proteins
 - **[Molecular Descriptors Reference](docs/molecular_descriptors.md)** - Complete descriptor reference
 
 ## 📄 License
