@@ -411,7 +411,7 @@ class HierarchicalFeaturizer:
         min_len = min(orig_token_len, orig_sasa_len)
 
         if orig_token_len != orig_sasa_len:
-            logger.warning(
+            logger.debug(
                 f"Atom count mismatch in {pdb_path}: tokens={orig_token_len}, SASA={orig_sasa_len}. "
                 f"Truncating to {min_len} atoms."
             )
