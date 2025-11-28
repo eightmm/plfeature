@@ -52,11 +52,11 @@ featurizer = ProteinFeaturizer("protein.pdb")
 # Sequence extraction by chain
 sequences_by_chain = featurizer.get_sequence_by_chain()  # {'A': "ACDEF...", 'B': "GHIKL..."}
 
-# Atom-level features (node/edge format with SASA included)
-atom_node, atom_edge = featurizer.get_atom_features(distance_cutoff=4.0)
+# Atom-level graph features (node/edge format with SASA included)
+atom_node, atom_edge = featurizer.get_atom_graph(distance_cutoff=4.0)
 
 # Residue-level features (node/edge format)
-res_node, res_edge = featurizer.get_residue_features(distance_cutoff=8.0)
+res_node, res_edge = featurizer.get_features(distance_cutoff=8.0)
 ```
 
 ### Hierarchical Features with ESM Embeddings
@@ -95,29 +95,38 @@ pocket = data.select_residues([10, 11, 12, 45, 46])
 
 ### Interaction Features (PLI)
 ```python
-from plfeature import InteractionFeaturizer
+from plfeature import PLInteractionFeaturizer
+from rdkit import Chem
 
-# SMARTS-based pharmacophore detection for protein-ligand interactions
-featurizer = InteractionFeaturizer("CC(=O)Oc1ccccc1C(=O)O")  # Aspirin
+# Load protein and ligand molecules (must have 3D coordinates)
+protein_mol = Chem.MolFromPDBFile("protein.pdb")
+ligand_mol = Chem.MolFromMolFile("ligand.sdf")
 
-# Get pharmacophore counts
-counts = featurizer.get_pharmacophore_counts()
-# {'hbond_donor': 1, 'hbond_acceptor': 5, 'aromatic': 7, ...}
+# Initialize featurizer with both molecules
+featurizer = PLInteractionFeaturizer(protein_mol, ligand_mol, distance_cutoff=4.5)
 
-# Get atom-level pharmacophore labels (9 categories)
-atom_labels = featurizer.get_atom_pharmacophore_labels()  # [n_atoms, 9]
+# Get interaction edges and features for GNN
+edges, edge_features = featurizer.get_interaction_edges()
+# edges: [2, num_interactions] - (protein_atom_idx, ligand_atom_idx) pairs
+# edge_features: [num_interactions, 73] - comprehensive interaction features
 
-# Get comprehensive interaction features
-features = featurizer.get_interaction_features()
-# Includes: pharmacophore_counts, atom_features, summary
+# Get complete interaction graph data
+graph = featurizer.get_interaction_graph()
+# Includes: edges, edge_features, interactions, interaction_counts, metadata
 
-# Get interaction potential for each atom
-atom_features = featurizer.get_atom_interaction_features()
-# interaction_potential: [n_atoms, 7] - H-bond, salt bridge, pi-stack, etc.
+# Detect specific interaction types
+hbonds = featurizer.detect_hydrogen_bonds()
+salt_bridges = featurizer.detect_salt_bridges()
+pi_stacking = featurizer.detect_pi_stacking()
+hydrophobic = featurizer.detect_hydrophobic()
 
-# With custom SMARTS patterns
-custom = {'my_warhead': '[CX3](=[OX1])[Cl,Br,I]'}
-featurizer = InteractionFeaturizer("CC(=O)Cl", custom_smarts=custom)
+# Get pharmacophore features for atoms
+protein_pharm, ligand_pharm = featurizer.get_atom_pharmacophore_features()
+# protein_pharm: [n_protein_atoms, 7] - pharmacophore type one-hot
+# ligand_pharm: [n_ligand_atoms, 7]
+
+# Get summary of detected interactions
+print(featurizer.get_interaction_summary())
 ```
 
 ### PDB Standardization
@@ -162,10 +171,10 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 - **Graph Features**: 157D atom features, 66D bond features → [Details](docs/molecule_graph.md)
 
 ### Interactions (PLI)
-- **Pharmacophore Types**: 9 categories (H-bond donor/acceptor, charged, aromatic, hydrophobic, halogen, metal)
-- **Atom-Level Features**: Per-atom pharmacophore labels and interaction potential
-- **63 SMARTS Patterns**: Comprehensive functional group detection
-- **3D Support**: Pharmacophore point coordinates when 3D structure available
+- **Interaction Types**: 7 categories (hydrogen bond, salt bridge, pi-stacking, cation-pi, hydrophobic, halogen bond, metal coordination)
+- **Edge Features**: 73-dimensional features per interaction (interaction type, distance, angles, element types, hybridization, residue info)
+- **Pharmacophore Detection**: SMARTS-based detection for H-bond donors/acceptors, charged groups, aromatics, hydrophobics, halogens
+- **Heavy Atom Only**: Graph nodes use heavy atoms only, hydrogen info encoded in edge features (angles)
 
 ### Proteins
 - **Atom Features**: 187 token types with atomic SASA → [Details](docs/protein_atom_feature.md)
