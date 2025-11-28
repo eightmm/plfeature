@@ -403,15 +403,9 @@ python scripts/batch_ligand_featurize.py \
 ## 🧪 Examples
 
 Check out the [example/](example/) directory for:
-- **10gs_protein.pdb** and **10gs_ligand.sdf**: Example input files
-- **test_featurizer.py**: Comprehensive test script demonstrating all features
-- **test_ptm_handling.py**: PTM handling modes test suite
-
-```bash
-cd example
-python test_featurizer.py       # Test all featurizer functions
-python test_ptm_handling.py     # Test PTM handling modes (base_aa, preserve, remove)
-```
+- **10gs_protein.pdb** and **10gs_ligand.sdf**: Example protein-ligand complex files
+- **usage_example.ipynb**: Jupyter notebook with comprehensive usage examples
+- **README.md**: Quick reference for example files
 
 ## 📖 Documentation
 
