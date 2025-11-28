@@ -309,7 +309,7 @@ distances = standard_contacts['distances']
 adjacency = standard_contacts['adjacency_matrix']
 ```
 
-### Batch Processing
+### Batch Processing (Python)
 ```python
 from plfeature import MoleculeFeaturizer
 import torch
@@ -324,6 +324,96 @@ for smiles in smiles_list:
 
 descriptors = torch.stack(all_features)
 ```
+
+### Batch Processing (CLI Scripts)
+
+For large-scale feature extraction, use the provided CLI scripts in the `scripts/` directory.
+
+#### Protein Batch Processing
+```bash
+# Basic usage - extract hierarchical features with ESM embeddings
+python scripts/batch_protein_featurize.py \
+    --input_dir /data/proteins \
+    --output_dir /data/protein-features
+
+# Parallel processing with 4 workers
+python scripts/batch_protein_featurize.py \
+    --input_dir /data/proteins \
+    --output_dir /data/protein-features \
+    --num_workers 4
+
+# Resume interrupted processing
+python scripts/batch_protein_featurize.py \
+    --input_dir /data/proteins \
+    --output_dir /data/protein-features \
+    --resume
+
+# Limit number of files (for testing)
+python scripts/batch_protein_featurize.py \
+    --input_dir /data/proteins \
+    --output_dir /data/protein-features \
+    --limit 100
+```
+
+**Output features (`.pt` files):**
+| Feature | Shape | Description |
+|---------|-------|-------------|
+| `atom_tokens` | `[N_atom]` | Token indices 0-186 (187 classes) |
+| `atom_elements` | `[N_atom]` | Element indices 0-7 (8 classes) |
+| `atom_residue_types` | `[N_atom]` | Residue indices 0-21 (22 classes) |
+| `atom_coords` | `[N_atom, 3]` | 3D coordinates |
+| `atom_sasa` | `[N_atom]` | Solvent accessible surface area |
+| `residue_features` | `[N_res, 76]` | Residue-level scalar features |
+| `residue_vector_features` | `[N_res, 31, 3]` | Residue-level vector features |
+| `esmc_embeddings` | `[N_res, 1152]` | ESMC embeddings |
+| `esm3_embeddings` | `[N_res, 1536]` | ESM3 embeddings |
+| `atom_to_residue` | `[N_atom]` | Atom-to-residue mapping |
+
+#### Ligand Batch Processing
+```bash
+# Basic usage - extract all features (descriptors + fingerprints + graph)
+python scripts/batch_ligand_featurize.py \
+    --input_dir /data/ligands \
+    --output_dir /data/ligand-features
+
+# Graph features only (faster, smaller files)
+python scripts/batch_ligand_featurize.py \
+    --input_dir /data/ligands \
+    --output_dir /data/ligand-features \
+    --graph_only
+
+# Parallel processing
+python scripts/batch_ligand_featurize.py \
+    --input_dir /data/ligands \
+    --output_dir /data/ligand-features \
+    --num_workers 4
+
+# Without adding hydrogens
+python scripts/batch_ligand_featurize.py \
+    --input_dir /data/ligands \
+    --output_dir /data/ligand-features \
+    --no_hydrogens
+
+# Resume interrupted processing
+python scripts/batch_ligand_featurize.py \
+    --input_dir /data/ligands \
+    --output_dir /data/ligand-features \
+    --resume
+```
+
+**Supported file formats:** SDF, MOL2, MOL, PDB (priority order)
+- If same ligand exists in multiple formats, tries each until one loads successfully
+
+**Output features (`.pt` files):**
+| Feature | Shape | Description |
+|---------|-------|-------------|
+| `node_feats` | `[N_atoms, 157]` | Atom-level features |
+| `edge_feats` | `[N_edges, 66]` | Bond-level features |
+| `edge_index` | `[2, N_edges]` | Edge connectivity |
+| `adjacency` | `[N_atoms, N_atoms]` | Adjacency matrix |
+| `descriptor` | `[40]` | Molecular descriptors (not with `--graph_only`) |
+| `morgan` | `[2048]` | Morgan fingerprint (not with `--graph_only`) |
+| `maccs` | `[167]` | MACCS fingerprint (not with `--graph_only`) |
 
 
 ## 🧪 Examples
