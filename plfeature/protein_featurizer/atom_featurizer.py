@@ -2,138 +2,29 @@
 Atom-level protein featurizer for extracting atomic features and SASA.
 """
 
+import logging
 import torch
 import numpy as np
 from typing import Dict, Tuple, Optional, List
 import freesasa
 
+logger = logging.getLogger(__name__)
+
+from .pdb_utils import (
+    is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
+    normalize_residue_name,
+)
 from ..constants import (
     # Amino acid mappings
-    AMINO_ACID_3TO1,
-    AMINO_ACID_1TO3,
-    AMINO_ACID_3_TO_INT,
-    AMINO_ACID_1_TO_INT,
     AMINO_ACID_LETTERS,
     # Residue tokens
     RESIDUE_TOKEN,
     RESIDUE_ATOM_TOKEN,
     UNK_TOKEN,
-    # Histidine/Cysteine variants
-    HISTIDINE_VARIANTS,
-    CYSTEINE_VARIANTS,
     # Element mappings
     PROTEIN_ELEMENT_TYPES,
     ATOM_NAME_TO_ELEMENT,
 )
-
-
-####################################################################################################
-################################   UTILITY FUNCTIONS   #############################################
-####################################################################################################
-
-def is_atom_record(line: str) -> bool:
-    """
-    Check if a PDB line is an ATOM record.
-
-    Args:
-        line: PDB format line
-
-    Returns:
-        True if the line is an ATOM record
-    """
-    if len(line) < 6:
-        return False
-    record_type = line[:6].strip()
-    return record_type == 'ATOM'
-
-
-def is_hetatm_record(line: str) -> bool:
-    """
-    Check if a PDB line is a HETATM record.
-
-    Args:
-        line: PDB format line
-
-    Returns:
-        True if the line is a HETATM record
-    """
-    if len(line) < 6:
-        return False
-    record_type = line[:6].strip()
-    return record_type == 'HETATM'
-
-
-def is_hydrogen(line: str) -> bool:
-    """
-    Check if atom is hydrogen based on PDB line.
-
-    Args:
-        line: PDB format line
-
-    Returns:
-        True if the atom is hydrogen
-    """
-    if len(line) < 14:
-        return False
-    # Check element column (77-78) first
-    if len(line) > 77:
-        element = line[76:78].strip()
-        if element and element.upper() == 'H':
-            return True
-    # Fallback: check atom name (column 13-16)
-    if len(line) > 13:
-        atom_name = line[12:16].strip()
-        if atom_name and atom_name[0] == 'H':
-            return True
-    return False
-
-
-def parse_pdb_atom_line(line: str) -> Tuple[str, str, str, int, str, Tuple[float, float, float], str]:
-    """
-    Parse a PDB ATOM/HETATM line into components.
-
-    Args:
-        line: PDB format line
-
-    Returns:
-        Tuple of (record_type, atom_name, res_name, res_num, chain_id, coordinates, element)
-    """
-    record_type = line[:6].strip()
-    atom_name = line[12:16].strip()
-    res_name = line[17:20].strip()
-    chain_id = line[21] if len(line) > 21 else ' '
-    res_num = int(line[22:26]) if len(line) > 26 else 0
-
-    # Parse element symbol (columns 77-78 in PDB format)
-    element = ''
-    if len(line) > 77:
-        element = line[76:78].strip().upper()
-
-    # Fallback: infer from atom name if element not present
-    if not element and atom_name:
-        # Remove digits and special characters
-        element = ''.join(c for c in atom_name if c.isalpha())
-        if element:
-            # Take first 1-2 characters
-            if len(element) >= 2 and element[:2] in ['CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'CL', 'BR', 'SE']:
-                element = element[:2].upper()
-            else:
-                element = element[0].upper()
-
-    # Parse coordinates
-    try:
-        x = float(line[30:38]) if len(line) > 38 else 0.0
-        y = float(line[38:46]) if len(line) > 46 else 0.0
-        z = float(line[46:54]) if len(line) > 54 else 0.0
-        coordinates = (x, y, z)
-    except (ValueError, IndexError):
-        coordinates = (0.0, 0.0, 0.0)
-
-    return record_type, atom_name, res_name, res_num, chain_id, coordinates, element
-
-####################################################################################################
-################################       PROTEIN      ################################################
-####################################################################################################
 
 
 class AtomFeaturizer:
@@ -185,24 +76,18 @@ class AtomFeaturizer:
             if atom_type == 'OXT' or res_type in ['LLP', 'PTR']:
                 continue
 
-            # Handle metal ions - check if atom name matches first 2 chars of residue
-            if len(atom_type) >= 2 and len(res_type) >= 2 and atom_type[:2] == res_type[:2]:
-                # Metal ion detected - keep specific metal type
-                res_type = 'METAL'
-                # atom_type stays as specific metal (CA, MG, ZN, FE, etc.)
-            # Handle histidine variants
-            elif res_type in HISTIDINE_VARIANTS:
-                res_type = 'HIS'
-            # Handle cysteine variants
-            elif res_type in CYSTEINE_VARIANTS:
-                res_type = 'CYS'
-            # Handle unknown residues
-            elif res_type not in self.aa_letter:
+            # Normalize residue name (handles metal, HIS/CYS variants, unknown)
+            res_type_norm = normalize_residue_name(res_type, atom_type)
+
+            # Handle unknown residues - need special atom_type handling
+            if res_type_norm == 'UNK':
                 res_type = 'XXX'
                 # For non-standard residues, try to preserve key atoms
                 if atom_type not in ['N', 'CA', 'C', 'O', 'CB', 'P', 'S', 'SE']:
                     # Use first character as generic atom type
                     atom_type = atom_type[0] if atom_type else 'C'
+            else:
+                res_type = res_type_norm
 
             # Get token ID
             tok = self.res_atm_token.get((res_type, atom_type), UNK_TOKEN)
@@ -317,13 +202,9 @@ class AtomFeaturizer:
             if atom_name == 'OXT' or res_name in ['LLP', 'PTR']:
                 continue
 
-            # Handle residue name normalization
-            res_name_clean = res_name.strip()
-            if res_name_clean in HISTIDINE_VARIANTS:
-                res_name_clean = 'HIS'
-            elif res_name_clean in CYSTEINE_VARIANTS:
-                res_name_clean = 'CYS'
-            elif res_name_clean not in self.aa_letter:
+            # Handle residue name normalization (centralized function)
+            res_name_clean = normalize_residue_name(res_name, atom_name)
+            if res_name_clean == 'UNK':
                 res_name_clean = 'XXX'
 
             res_tok = self.res_token.get(res_name_clean, RESIDUE_TOKEN['UNK'])
@@ -351,7 +232,17 @@ class AtomFeaturizer:
             atom_elements.append(element_type)
 
         # Ensure all tensors have the same length
-        min_len = min(len(token), len(atom_sasa))
+        orig_token_len = len(token)
+        orig_sasa_len = len(atom_sasa)
+        orig_element_len = len(atom_elements)
+        min_len = min(orig_token_len, orig_sasa_len, orig_element_len)
+
+        if not (orig_token_len == orig_sasa_len == orig_element_len):
+            logger.warning(
+                f"Atom count mismatch in {pdb_file}: "
+                f"tokens={orig_token_len}, SASA={orig_sasa_len}, elements={orig_element_len}. "
+                f"Truncating to {min_len} atoms."
+            )
 
         features = {
             'token': token[:min_len],

@@ -20,6 +20,11 @@ from .elements import (
     PROTEIN_ELEMENT_TYPES,
     ATOM_NAME_TO_ELEMENT,
 
+    # Simplified element types for hierarchical models
+    SIMPLIFIED_ELEMENT_TYPES,
+    NUM_SIMPLIFIED_ELEMENT_TYPES,
+    METAL_ELEMENTS,
+
     # Periodic table
     PERIODIC_TABLE,
     PERIODS,
@@ -55,6 +60,7 @@ from .amino_acids import (
     # Residue tokens
     RESIDUE_TYPES,
     NUM_RESIDUE_TYPES,
+    MAX_ATOMS_PER_RESIDUE,
     RESIDUE_TOKEN,
     RESIDUE_ATOM_TOKEN,
     UNK_TOKEN,
@@ -66,6 +72,15 @@ from .amino_acids import (
     # Backbone
     BACKBONE_ATOMS,
     BACKBONE_ATOMS_WITH_CB,
+
+    # Standard atoms per residue (for standardization)
+    STANDARD_ATOMS,
+    STANDARD_ATOMS_PTM,
+
+    # Residue name normalization
+    RESIDUE_NAME_MAPPING,
+    PTM_RESIDUES,
+    NUCLEIC_ACID_RESIDUES,
 )
 
 # =============================================================================
@@ -156,6 +171,9 @@ __all__ = [
     'NUM_HEAVY_ELEMENT_TYPES',
     'PROTEIN_ELEMENT_TYPES',
     'ATOM_NAME_TO_ELEMENT',
+    'SIMPLIFIED_ELEMENT_TYPES',
+    'NUM_SIMPLIFIED_ELEMENT_TYPES',
+    'METAL_ELEMENTS',
     'PERIODIC_TABLE',
     'PERIODS',
     'GROUPS',
@@ -179,6 +197,7 @@ __all__ = [
     'AMINO_ACID_LETTERS',
     'RESIDUE_TYPES',
     'NUM_RESIDUE_TYPES',
+    'MAX_ATOMS_PER_RESIDUE',
     'RESIDUE_TOKEN',
     'RESIDUE_ATOM_TOKEN',
     'UNK_TOKEN',
@@ -186,6 +205,11 @@ __all__ = [
     'CYSTEINE_VARIANTS',
     'BACKBONE_ATOMS',
     'BACKBONE_ATOMS_WITH_CB',
+    'STANDARD_ATOMS',
+    'STANDARD_ATOMS_PTM',
+    'RESIDUE_NAME_MAPPING',
+    'PTM_RESIDUES',
+    'NUCLEIC_ACID_RESIDUES',
 
     # SMARTS patterns
     'PHARMACOPHORE_SMARTS',

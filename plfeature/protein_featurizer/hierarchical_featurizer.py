@@ -33,31 +33,31 @@ import numpy as np
 
 from .residue_featurizer import ResidueFeaturizer
 from .atom_featurizer import AtomFeaturizer
+from .pdb_utils import PDBParser, normalize_residue_name, calculate_sidechain_centroid
 from ..constants import (
     RESIDUE_ATOM_TOKEN,
     UNK_TOKEN,
     RESIDUE_TOKEN,
+    HISTIDINE_VARIANTS,
+    CYSTEINE_VARIANTS,
+    AMINO_ACID_LETTERS,
+    MAX_ATOMS_PER_RESIDUE,
+    # Element types for hierarchical models
+    SIMPLIFIED_ELEMENT_TYPES,
+    NUM_SIMPLIFIED_ELEMENT_TYPES,
+    METAL_ELEMENTS,
 )
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 # Number of unique atom tokens
 NUM_ATOM_TOKENS = UNK_TOKEN + 1  # 187
 
-# Simplified element types (8 classes)
-ELEMENT_TYPES = {
-    'C': 0,      # Carbon
-    'N': 1,      # Nitrogen
-    'O': 2,      # Oxygen
-    'S': 3,      # Sulfur
-    'P': 4,      # Phosphorus
-    'SE': 5,     # Selenium
-    'METAL': 6,  # All metals (CA, MG, ZN, FE, MN, CU, CO, NI, NA, K, etc.)
-    'UNK': 7,    # Unknown
-}
-NUM_ELEMENT_TYPES = len(ELEMENT_TYPES)
-
-# Metal elements for detection
-METAL_ELEMENTS = {'CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'K'}
+# Backward compatibility aliases
+ELEMENT_TYPES = SIMPLIFIED_ELEMENT_TYPES
+NUM_ELEMENT_TYPES = NUM_SIMPLIFIED_ELEMENT_TYPES
 
 
 @dataclass
@@ -262,26 +262,34 @@ class HierarchicalProteinData:
         if self.residue_vector_features is not None:
             new_residue_vector_features = self.residue_vector_features[residue_indices]
 
-        # Build new residue_atom_indices and mask
+        # Build new residue_atom_indices and mask (vectorized)
         num_new_residues = len(residue_indices)
-        atoms_per_residue = []
-        for new_idx in range(num_new_residues):
-            atoms_per_residue.append((new_atom_to_residue == new_idx).sum().item())
 
-        max_atoms = max(atoms_per_residue) if atoms_per_residue else 1
+        # Vectorized atom count per residue using bincount
+        new_num_atoms_per_residue = torch.bincount(
+            new_atom_to_residue, minlength=num_new_residues
+        )
+        max_atoms = new_num_atoms_per_residue.max().item() if num_new_residues > 0 else 1
+
         new_residue_atom_indices = torch.full((num_new_residues, max_atoms), -1, dtype=torch.long)
         new_residue_atom_mask = torch.zeros(num_new_residues, max_atoms, dtype=torch.bool)
-        new_num_atoms_per_residue = torch.zeros(num_new_residues, dtype=torch.long)
+
+        # Vectorized: sort atoms by residue index, then fill
+        sorted_indices = torch.argsort(new_atom_to_residue)
+        sorted_residues = new_atom_to_residue[sorted_indices]
+
+        # Use cumsum to find position within each residue
+        residue_starts = torch.zeros(num_new_residues + 1, dtype=torch.long)
+        residue_starts[1:] = torch.cumsum(new_num_atoms_per_residue, dim=0)
 
         for new_res_idx in range(num_new_residues):
-            res_atom_mask = (new_atom_to_residue == new_res_idx)
-            res_atom_indices = res_atom_mask.nonzero(as_tuple=True)[0]
-            n_atoms = len(res_atom_indices)
-            new_num_atoms_per_residue[new_res_idx] = n_atoms
-            for j, atom_idx in enumerate(res_atom_indices.tolist()):
-                if j < max_atoms:
-                    new_residue_atom_indices[new_res_idx, j] = atom_idx
-                    new_residue_atom_mask[new_res_idx, j] = True
+            start = residue_starts[new_res_idx].item()
+            end = residue_starts[new_res_idx + 1].item()
+            n_atoms = end - start
+            if n_atoms > 0:
+                atom_indices = sorted_indices[start:end]
+                new_residue_atom_indices[new_res_idx, :n_atoms] = atom_indices
+                new_residue_atom_mask[new_res_idx, :n_atoms] = True
 
         # ESM embeddings: select residue embeddings, keep original BOS/EOS
         new_esmc_embeddings = None
@@ -378,19 +386,32 @@ class HierarchicalFeaturizer:
         Returns:
             HierarchicalProteinData with all features and mappings
         """
+        # Step 0: Parse PDB once using PDBParser (cached for reuse)
+        pdb_parser = PDBParser(pdb_path)
+
         # Step 1: Get atom features from AtomFeaturizer
         atom_tokens, atom_coords = self._atom_featurizer.get_protein_atom_features(pdb_path)
 
-        # Step 2: Get SASA from AtomFeaturizer
+        # Step 2: Get SASA from AtomFeaturizer (requires file for FreeSASA)
         atom_sasa, _ = self._atom_featurizer.get_atom_sasa(pdb_path)
+
         # Ensure same length (SASA might have different atom count due to different parsing)
-        min_len = min(len(atom_tokens), len(atom_sasa))
+        orig_token_len = len(atom_tokens)
+        orig_sasa_len = len(atom_sasa)
+        min_len = min(orig_token_len, orig_sasa_len)
+
+        if orig_token_len != orig_sasa_len:
+            logger.warning(
+                f"Atom count mismatch in {pdb_path}: tokens={orig_token_len}, SASA={orig_sasa_len}. "
+                f"Truncating to {min_len} atoms."
+            )
+
         atom_tokens = atom_tokens[:min_len]
         atom_coords = atom_coords[:min_len]
         atom_sasa = atom_sasa[:min_len]
 
-        # Step 3: Get additional atom info (elements, residue types)
-        atom_info = self._parse_atom_info(pdb_path)
+        # Step 3: Get additional atom info from cached PDBParser (no re-parsing)
+        atom_info = self._parse_atom_info(pdb_parser)
         atom_elements = atom_info['elements'][:min_len]
         atom_residue_types = atom_info['residue_tokens'][:min_len]
         atom_names = atom_info['atom_names'][:min_len]
@@ -405,13 +426,18 @@ class HierarchicalFeaturizer:
 
         # Build residue coordinate tensor
         num_residues = len(residues)
-        residue_coords_full = torch.zeros(num_residues, 15, 3)
+        residue_coords_full = torch.zeros(num_residues, MAX_ATOMS_PER_RESIDUE, 3)
         residue_types = torch.from_numpy(np.array(residues)[:, 2].astype(int))
 
         for idx, residue in enumerate(residues):
-            residue_coord = torch.as_tensor(residue_featurizer.get_residue_coordinates(residue).tolist())
+            # Use cached coordinates (O(1) lookup instead of pandas xs)
+            residue_coord_np = residue_featurizer.get_residue_coordinates_numpy(residue)
+            residue_coord = torch.from_numpy(residue_coord_np)
             residue_coords_full[idx, :residue_coord.shape[0], :] = residue_coord
-            residue_coords_full[idx, -1, :] = residue_coord[4:, :].mean(0) if residue_coord.shape[0] > 4 else residue_coord.mean(0)
+            # Sidechain centroid (using unified calculate_sidechain_centroid)
+            residue_coords_full[idx, -1, :] = torch.from_numpy(
+                calculate_sidechain_centroid(residue_coord_np)
+            )
 
         # Extract residue features
         scalar_features, vector_features = residue_featurizer._extract_residue_features(
@@ -486,8 +512,7 @@ class HierarchicalFeaturizer:
         # Verify length matches and truncate/pad if needed
         def _adjust_length(emb, target_len, name):
             if emb.shape[0] != target_len:
-                import logging
-                logging.warning(
+                logger.warning(
                     f"{name} length ({emb.shape[0]}) != residue count ({target_len}). Adjusting."
                 )
                 if emb.shape[0] > target_len:
@@ -561,9 +586,14 @@ class HierarchicalFeaturizer:
         finally:
             os.unlink(pocket_pdb)
 
-    def _parse_atom_info(self, pdb_path: str) -> Dict:
+    def _parse_atom_info(self, pdb_parser: PDBParser) -> Dict:
         """
-        Parse additional atom information from PDB file.
+        Extract atom information from pre-parsed PDB data.
+
+        Uses PDBParser's cached data to avoid re-reading file.
+
+        Args:
+            pdb_parser: Pre-initialized PDBParser instance
 
         Returns dict with:
             - elements: [N_atom] element type indices
@@ -571,48 +601,17 @@ class HierarchicalFeaturizer:
             - atom_names: List[str] atom names
             - residue_keys: List[(chain, resnum)] for mapping
         """
-        from .atom_featurizer import (
-            is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line
-        )
-        from ..constants import HISTIDINE_VARIANTS, CYSTEINE_VARIANTS
-
         elements = []
         residue_tokens = []
         atom_names = []
         residue_keys = []
 
-        with open(pdb_path, 'r') as f:
-            lines = f.readlines()
-
-        for line in lines:
-            if not (is_atom_record(line) or is_hetatm_record(line)):
-                continue
-            if is_hydrogen(line):
-                continue
-
-            record_type, atom_name, res_name, res_num, chain_id, xyz, element = parse_pdb_atom_line(line)
-
-            # Skip water and special residues
-            if res_name == 'HOH':
-                continue
-            if atom_name == 'OXT' or res_name in ['LLP', 'PTR']:
-                continue
-
-            # Normalize residue name
-            res_name_clean = res_name.strip()
-
-            # Handle metal ions
-            if len(atom_name) >= 2 and len(res_name_clean) >= 2 and atom_name[:2] == res_name_clean[:2]:
-                res_name_clean = 'METAL'
-            elif res_name_clean in HISTIDINE_VARIANTS:
-                res_name_clean = 'HIS'
-            elif res_name_clean in CYSTEINE_VARIANTS:
-                res_name_clean = 'CYS'
-            elif res_name_clean not in self._atom_featurizer.aa_letter:
-                res_name_clean = 'UNK'
+        for atom in pdb_parser.protein_atoms:
+            # Normalize residue name using centralized function
+            res_name_clean = normalize_residue_name(atom.res_name, atom.atom_name)
 
             # Element type (simplified: C, N, O, S, P, Se, Metal, UNK)
-            element_upper = element.upper() if element else ''
+            element_upper = atom.element.upper() if atom.element else ''
             if element_upper in ELEMENT_TYPES:
                 elem_idx = ELEMENT_TYPES[element_upper]
             elif element_upper in METAL_ELEMENTS:
@@ -625,8 +624,8 @@ class HierarchicalFeaturizer:
 
             elements.append(elem_idx)
             residue_tokens.append(res_tok)
-            atom_names.append(atom_name)
-            residue_keys.append((chain_id, res_num))
+            atom_names.append(atom.atom_name)
+            residue_keys.append((atom.chain_id, atom.res_num))
 
         return {
             'elements': torch.tensor(elements, dtype=torch.long),
@@ -690,7 +689,6 @@ class HierarchicalFeaturizer:
 
 def extract_hierarchical_features(
     pdb_path: str,
-    include_residue_vectors: bool = False,
     esmc_model: str = "esmc_600m",
     esm3_model: str = "esm3-open",
     esm_device: str = "cuda",
@@ -700,16 +698,20 @@ def extract_hierarchical_features(
 
     Args:
         pdb_path: Path to PDB file
-        include_residue_vectors: Include residue vector features
-        esmc_model: ESMC model name
-        esm3_model: ESM3 model name
-        esm_device: Device for ESM models
+        esmc_model: ESMC model name (default: "esmc_600m", 1152-dim)
+        esm3_model: ESM3 model name (default: "esm3-open", 1536-dim)
+        esm_device: Device for ESM models ("cuda" or "cpu")
 
     Returns:
-        HierarchicalProteinData with all features including ESM embeddings
+        HierarchicalProteinData with all features including:
+            - Atom-level features (one-hot encoded)
+            - Residue-level features (scalar + vector)
+            - ESM embeddings (ESMC + ESM3, 6 tensors total)
+
+    Note:
+        Residue vector features are always included (31x3 per residue).
     """
     featurizer = HierarchicalFeaturizer(
-        include_residue_vectors=include_residue_vectors,
         esmc_model=esmc_model,
         esm3_model=esm3_model,
         esm_device=esm_device,

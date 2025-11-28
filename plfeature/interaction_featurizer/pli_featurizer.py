@@ -25,34 +25,25 @@ from ..constants import (
     IDEAL_DISTANCES,
     PHARMACOPHORE_IDX,
     NUM_PHARMACOPHORE_TYPES,
+    # Element types (heavy atoms only)
+    HEAVY_ELEMENT_TYPES,
+    NUM_HEAVY_ELEMENT_TYPES,
+    # Hybridization types
+    HYBRIDIZATION_TYPES,
+    NUM_HYBRIDIZATION_TYPES,
+    # Residue types
+    RESIDUE_TYPES,
+    NUM_RESIDUE_TYPES,
 )
 
 
 # =============================================================================
-# Constants for Feature Encoding
+# Backward Compatibility Aliases
 # =============================================================================
 
-# Element types for one-hot encoding (heavy atoms only)
-ELEMENT_TYPES = ['C', 'N', 'O', 'S', 'P', 'F', 'Cl', 'Br', 'I', 'Other']
-NUM_ELEMENT_TYPES = len(ELEMENT_TYPES)
-
-# Hybridization types
-HYBRIDIZATION_TYPES = [
-    Chem.HybridizationType.SP,
-    Chem.HybridizationType.SP2,
-    Chem.HybridizationType.SP3,
-    Chem.HybridizationType.SP3D,
-    Chem.HybridizationType.SP3D2,
-]
-NUM_HYBRIDIZATION_TYPES = len(HYBRIDIZATION_TYPES) + 1  # +1 for other
-
-# Standard amino acid types (3-letter codes)
-RESIDUE_TYPES = [
-    'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-    'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-    'Other'
-]
-NUM_RESIDUE_TYPES = len(RESIDUE_TYPES)
+# Element types alias for this module
+ELEMENT_TYPES = HEAVY_ELEMENT_TYPES
+NUM_ELEMENT_TYPES = NUM_HEAVY_ELEMENT_TYPES
 
 
 @dataclass

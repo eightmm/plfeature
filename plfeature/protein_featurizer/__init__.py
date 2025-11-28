@@ -13,6 +13,17 @@ from .hierarchical_featurizer import (
     HierarchicalProteinData,
     extract_hierarchical_features,
 )
+from .pdb_utils import (
+    PDBParser,
+    ParsedAtom,
+    ParsedResidue,
+    is_atom_record,
+    is_hetatm_record,
+    is_hydrogen,
+    parse_pdb_line,
+    normalize_residue_name,
+    calculate_sidechain_centroid,
+)
 
 # ESM featurizer (lazy import to avoid esm dependency)
 def get_esm_featurizer():
@@ -29,16 +40,28 @@ __version__ = "0.1.0"
 __author__ = "Jaemin Sim"
 
 __all__ = [
+    # Featurizers
     "PDBStandardizer",
     "ResidueFeaturizer",
     "AtomFeaturizer",
     "HierarchicalFeaturizer",
     "HierarchicalProteinData",
+    "ProteinFeaturizer",
+    # PDB utilities
+    "PDBParser",
+    "ParsedAtom",
+    "ParsedResidue",
+    "is_atom_record",
+    "is_hetatm_record",
+    "is_hydrogen",
+    "parse_pdb_line",
+    "normalize_residue_name",
+    "calculate_sidechain_centroid",
+    # Convenience functions
     "standardize_pdb",
     "get_protein_atom_features",
     "get_atom_features_with_sasa",
     "extract_hierarchical_features",
-    "ProteinFeaturizer",
     "get_esm_featurizer",
     "get_dual_esm_featurizer",
 ]

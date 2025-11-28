@@ -42,6 +42,23 @@ PROTEIN_ELEMENT_TYPES = {
     'UNK': 18,    # Unknown
 }
 
+# Simplified element types for hierarchical models (8 classes)
+# Groups metals together, focuses on biologically relevant atoms
+SIMPLIFIED_ELEMENT_TYPES = {
+    'C': 0,      # Carbon
+    'N': 1,      # Nitrogen
+    'O': 2,      # Oxygen
+    'S': 3,      # Sulfur
+    'P': 4,      # Phosphorus
+    'SE': 5,     # Selenium
+    'METAL': 6,  # All metals (CA, MG, ZN, FE, MN, CU, CO, NI, NA, K, etc.)
+    'UNK': 7,    # Unknown
+}
+NUM_SIMPLIFIED_ELEMENT_TYPES = len(SIMPLIFIED_ELEMENT_TYPES)
+
+# Metal elements for detection
+METAL_ELEMENTS = {'CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'K'}
+
 # Atom name to element mapping for standard amino acids
 ATOM_NAME_TO_ELEMENT = {
     'N': 'N', 'CA': 'C', 'C': 'C', 'O': 'O', 'CB': 'C',

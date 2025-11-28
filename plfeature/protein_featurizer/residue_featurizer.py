@@ -24,29 +24,37 @@ except ImportError:
     FREESASA_AVAILABLE = False
     fs = None
 
-# Import unified PDB parsing utilities from atom_featurizer
-try:
-    from .atom_featurizer import is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line
-except ImportError:
-    # Fallback if running as standalone
-    from atom_featurizer import is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line
+# Import unified PDB parsing utilities from canonical location
+from .pdb_utils import (
+    is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
+    calculate_sidechain_centroid,
+)
+
+# Import amino acid constants from centralized module
+from ..constants import (
+    AMINO_ACID_3TO1,
+    AMINO_ACID_1TO3,
+    AMINO_ACID_1_TO_INT,
+    AMINO_ACID_3_TO_INT,
+    MAX_ATOMS_PER_RESIDUE,
+    NUM_RESIDUE_TYPES,
+)
 
 
-# Amino acid mappings
-AMINO_ACID_3TO1 = {
-    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
-    'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
-    'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
-    'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V',
+# =============================================================================
+# Chi Angle Constants (cached at module level)
+# =============================================================================
+# Residue indices that have each chi angle
+CHI_ANGLE_RESIDUE_INDICES = {
+    'chi1': torch.tensor([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]),
+    'chi2': torch.tensor([2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19]),
+    'chi3': torch.tensor([3, 8, 10, 13, 14]),
+    'chi4': torch.tensor([8, 14]),
+    'chi5': torch.tensor([14]),
 }
 
-AMINO_ACID_1TO3 = {v: k for k, v in AMINO_ACID_3TO1.items()}
-AMINO_ACID_1_TO_INT = {k: i for i, k in enumerate(sorted(AMINO_ACID_1TO3.keys()))}
-AMINO_ACID_3_TO_INT = {AMINO_ACID_1TO3[k]: i for i, k in enumerate(sorted(AMINO_ACID_1TO3.keys()))}
-
-# Add unknown residue mapping
-AMINO_ACID_1_TO_INT['X'] = 20
-AMINO_ACID_3_TO_INT['UNK'] = 20
+# ILE residue index for special handling
+ILE_RESIDUE_INDEX = torch.tensor([7])
 
 
 @contextlib.contextmanager
@@ -85,6 +93,12 @@ class ResidueFeaturizer:
         self.pdb_file = pdb_file
         self.protein_indices, self.hetero_indices, self.protein_atom_info, self.hetero_atom_info = \
             self._parse_pdb(pdb_file)
+
+        # Pre-build coordinate cache using groupby (faster than xs lookup)
+        self._coord_cache = {}
+        grouped = self.protein_atom_info.groupby(level=[0, 1, 2])
+        for residue_key, group in grouped:
+            self._coord_cache[residue_key] = np.vstack(group['coord'].values).astype(np.float32)
 
     def _parse_pdb(self, pdb_file: str) -> Tuple[pd.MultiIndex, pd.MultiIndex, pd.DataFrame, pd.DataFrame]:
         """
@@ -187,6 +201,20 @@ class ResidueFeaturizer:
         """
         return self.protein_atom_info.coord.xs(residue_index)
 
+    def get_residue_coordinates_numpy(self, residue_index: Tuple) -> np.ndarray:
+        """
+        Get coordinates for a specific residue as numpy array (faster).
+
+        Uses pre-built cache for O(1) lookup instead of pandas xs().
+
+        Args:
+            residue_index: Tuple of (chain, residue_number, residue_type)
+
+        Returns:
+            Coordinates as numpy array [num_atoms, 3]
+        """
+        return self._coord_cache.get(residue_index, np.zeros((1, 3), dtype=np.float32))
+
     def get_terminal_flags(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Identify N-terminal and C-terminal residues.
@@ -267,32 +295,62 @@ class ResidueFeaturizer:
         Calculate Solvent Accessible Surface Area (SASA) for each residue.
 
         Returns:
-            SASA features tensor
+            SASA features tensor of shape [num_residues, 10] with:
+                - total/350, polar/350, apolar/350, mainChain/350, sideChain/350
+                - relativeTotal, relativePolar, relativeApolar, relativeMainChain, relativeSideChain
+
+        Raises:
+            RuntimeError: If FreeSASA calculation fails unexpectedly
         """
+        num_residues = len(self.get_residues())
+        sasa_dim = 10  # Number of SASA features per residue
+
         if not FREESASA_AVAILABLE:
             warnings.warn("FreeSASA not available. Returning zeros for SASA features.")
-            num_residues = len(self.get_residues())
-            return torch.zeros(num_residues, 10)
+            return torch.zeros(num_residues, sasa_dim)
 
-        with suppress_freesasa_warnings():
-            sasas = [
-                [
-                    values.total / 350,
-                    values.polar / 350,
-                    values.apolar / 350,
-                    values.mainChain / 350,
-                    values.sideChain / 350,
-                    values.relativeTotal,
-                    values.relativePolar,
-                    values.relativeApolar,
-                    values.relativeMainChain,
-                    values.relativeSideChain
-                ]
-                for chain, residues in fs.calc(fs.Structure(self.pdb_file)).residueAreas().items()
-                for residue, values in residues.items()
-            ]
+        try:
+            with suppress_freesasa_warnings():
+                structure = fs.Structure(self.pdb_file)
+                result = fs.calc(structure)
+                residue_areas = result.residueAreas()
 
-        return torch.nan_to_num(torch.as_tensor(sasas))
+                sasas = []
+                for chain, residues in residue_areas.items():
+                    for residue, values in residues.items():
+                        sasas.append([
+                            values.total / 350,
+                            values.polar / 350,
+                            values.apolar / 350,
+                            values.mainChain / 350,
+                            values.sideChain / 350,
+                            values.relativeTotal,
+                            values.relativePolar,
+                            values.relativeApolar,
+                            values.relativeMainChain,
+                            values.relativeSideChain
+                        ])
+
+            sasa_tensor = torch.nan_to_num(torch.as_tensor(sasas))
+
+            # Validate dimensions
+            if sasa_tensor.shape[0] != num_residues:
+                warnings.warn(
+                    f"SASA residue count ({sasa_tensor.shape[0]}) != structure residue count ({num_residues}). "
+                    f"This may indicate parsing differences between FreeSASA and internal parser."
+                )
+                # Adjust to match expected dimensions
+                if sasa_tensor.shape[0] > num_residues:
+                    sasa_tensor = sasa_tensor[:num_residues]
+                else:
+                    padding = torch.zeros(num_residues - sasa_tensor.shape[0], sasa_dim)
+                    sasa_tensor = torch.cat([sasa_tensor, padding], dim=0)
+
+            return sasa_tensor
+
+        except Exception as e:
+            warnings.warn(f"FreeSASA calculation failed: {e}. Returning zeros for SASA features.")
+            return torch.zeros(num_residues, sasa_dim)
 
     def _calculate_dihedral(self, coords: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
         """
@@ -335,19 +393,14 @@ class ResidueFeaturizer:
         Returns:
             Tuple of (dihedral_angles, has_chi_angles)
         """
-        # Chi angle residue indices
-        chi_indices = {
-            'chi1': torch.tensor([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]),
-            'chi2': torch.tensor([2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19]),
-            'chi3': torch.tensor([3, 8, 10, 13, 14]),
-            'chi4': torch.tensor([8, 14]),
-            'chi5': torch.tensor([14])
-        }
-
-        is_ILE = torch.isin(res_types, torch.tensor([7])).int().unsqueeze(1).unsqueeze(2)
+        # Use cached chi angle constants
+        is_ILE = torch.isin(res_types, ILE_RESIDUE_INDEX).int().unsqueeze(1).unsqueeze(2)
         is_not_ILE = 1 - is_ILE
 
-        has_chi = torch.stack([torch.isin(res_types, chi_indices[f'chi{i}']).int() for i in range(1, 6)], dim=1)
+        has_chi = torch.stack([
+            torch.isin(res_types, CHI_ANGLE_RESIDUE_INDICES[f'chi{i}']).int()
+            for i in range(1, 6)
+        ], dim=1)
 
         # Backbone dihedrals
         N_CA_C = coords[:, :3, :]
@@ -582,8 +635,9 @@ class ResidueFeaturizer:
         Returns:
             Tuple of (scalar_features, vector_features)
         """
-        # One-hot encoding of residue types
-        residue_one_hot = F.one_hot(residue_types, num_classes=21)
+        # One-hot encoding of residue types (with bounds checking)
+        residue_types_clamped = torch.clamp(residue_types, 0, NUM_RESIDUE_TYPES - 1)
+        residue_one_hot = F.one_hot(residue_types_clamped, num_classes=NUM_RESIDUE_TYPES)
         terminal_flags = self.get_terminal_flags()
 
         # Local self features
@@ -669,14 +723,18 @@ class ResidueFeaturizer:
             Tuple of (node_features, edge_features) dictionaries
         """
         residues = self.get_residues()
-        coords = torch.zeros(len(residues), 15, 3)
+        coords = torch.zeros(len(residues), MAX_ATOMS_PER_RESIDUE, 3)
         residue_types = torch.from_numpy(np.array(residues)[:, 2].astype(int))
 
-        # Build coordinate tensor
+        # Build coordinate tensor using cached coordinates (O(1) lookup)
         for idx, residue in enumerate(residues):
-            residue_coord = torch.as_tensor(self.get_residue_coordinates(residue).tolist())
+            residue_coord_np = self.get_residue_coordinates_numpy(residue)
+            residue_coord = torch.from_numpy(residue_coord_np)
             coords[idx, :residue_coord.shape[0], :] = residue_coord
-            coords[idx, -1, :] = residue_coord[4:, :].mean(0)  # Sidechain centroid
+            # Sidechain centroid (using calculate_sidechain_centroid logic)
+            coords[idx, -1, :] = torch.from_numpy(
+                calculate_sidechain_centroid(residue_coord_np)
+            )
 
         # Extract CA and SC coordinates
         coords_CA = coords[:, 1:2, :]

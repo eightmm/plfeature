@@ -8,128 +8,13 @@ It handles residue reordering, atom standardization, and removal of unwanted mol
 import os
 from typing import Dict, List, Tuple, Optional
 
-
-# Standard atoms for each amino acid residue
-STANDARD_ATOMS = {
-    'ALA': ['N', 'CA', 'C', 'O', 'CB'],
-    'ARG': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'NE', 'CZ', 'NH1', 'NH2'],
-    'ASN': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'OD1', 'ND2'],
-    'ASP': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'OD1', 'OD2'],
-    'CYS': ['N', 'CA', 'C', 'O', 'CB', 'SG'],
-    'GLN': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'OE1', 'NE2'],
-    'GLU': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'OE1', 'OE2'],
-    'GLY': ['N', 'CA', 'C', 'O'],
-    'HIS': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'ND1', 'CD2', 'CE1', 'NE2'],
-    'ILE': ['N', 'CA', 'C', 'O', 'CB', 'CG1', 'CG2', 'CD1'],
-    'LEU': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2'],
-    'LYS': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'CE', 'NZ'],
-    'MET': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'SD', 'CE'],
-    'PHE': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ'],
-    'PRO': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD'],
-    'SER': ['N', 'CA', 'C', 'O', 'CB', 'OG'],
-    'THR': ['N', 'CA', 'C', 'O', 'CB', 'OG1', 'CG2'],
-    'TRP': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2'],
-    'TYR': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ', 'OH'],
-    'VAL': ['N', 'CA', 'C', 'O', 'CB', 'CG1', 'CG2'],
-    'UNK': ['N', 'CA', 'C', 'O', 'CB'],  # Unknown residue, backbone + CB only
-
-    # Post-Translational Modifications (PTMs)
-    # For ptm_handling='preserve' mode
-    'SEP': ['N', 'CA', 'C', 'O', 'CB', 'OG', 'P', 'O1P', 'O2P', 'O3P'],  # Phosphoserine
-    'TPO': ['N', 'CA', 'C', 'O', 'CB', 'OG1', 'CG2', 'P', 'O1P', 'O2P', 'O3P'],  # Phosphothreonine
-    'PTR': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ', 'OH', 'P', 'O1P', 'O2P', 'O3P'],  # Phosphotyrosine
-    'MSE': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'SE', 'CE'],  # Selenomethionine
-    'HYP': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'OD1'],  # Hydroxyproline
-    'MLY': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'CE', 'NZ', 'CM1', 'CM2'],  # Dimethyllysine
-    'M3L': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'CE', 'NZ', 'CM1', 'CM2', 'CM3'],  # Trimethyllysine
-    'ALY': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'CE', 'NZ', 'C1', 'O1', 'C2'],  # Acetyllysine
-    'CSO': ['N', 'CA', 'C', 'O', 'CB', 'SG', 'OD1'],  # Cysteine sulfenic acid
-    'CSS': ['N', 'CA', 'C', 'O', 'CB', 'SG'],  # S-mercaptocysteine
-    'CME': ['N', 'CA', 'C', 'O', 'CB', 'SG', 'CE'],  # S-methylcysteine
-    'OCS': ['N', 'CA', 'C', 'O', 'CB', 'SG', 'O1', 'O2'],  # Cysteinesulfonic acid
-    'MEN': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'OD1', 'ND2', 'CN'],  # N-methylasparagine
-    'FME': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'SD', 'CE', 'CN', 'O1'],  # N-formylmethionine
-}
-
-# Nucleic acid residues to exclude
-NUCLEIC_ACID_RESIDUES = {
-    # DNA
-    'DA', 'DT', 'DG', 'DC', 'DI', 'DU',
-    # RNA
-    'A', 'U', 'G', 'C', 'I',
-    # Modified nucleotides
-    'ADE', 'THY', 'GUA', 'CYT', 'URA',
-    '1MA', '2MG', '4SU', '5MC', '5MU', 'PSU', 'H2U', 'M2G', 'OMC', 'OMG'
-}
-
-# Mapping of non-standard residue names to standard amino acids
-# This includes protonation states where heavy atom structure is identical
-RESIDUE_NAME_MAPPING = {
-    # Histidine protonation states (heavy atoms identical)
-    'HID': 'HIS',  # δ-protonated histidine (neutral)
-    'HIE': 'HIS',  # ε-protonated histidine (neutral)
-    'HIP': 'HIS',  # doubly protonated histidine (positive)
-    'HSD': 'HIS',  # alternative δ-protonated (CHARMM naming)
-    'HSE': 'HIS',  # alternative ε-protonated (CHARMM naming)
-    'HSP': 'HIS',  # alternative doubly protonated (CHARMM naming)
-    'HIN': 'HIS',  # alternative neutral histidine
-
-    # Cysteine protonation/bonding states (heavy atoms identical)
-    'CYX': 'CYS',  # disulfide-bonded cysteine (deprotonated thiol)
-    'CYM': 'CYS',  # deprotonated cysteine (thiolate anion)
-    'CYN': 'CYS',  # alternative deprotonated cysteine
-
-    # Aspartic acid protonation states (heavy atoms identical)
-    'ASH': 'ASP',  # protonated aspartic acid (neutral COOH)
-    'ASPP': 'ASP', # alternative protonated form
-    # NOTE: ASN (Asparagine) is a different amino acid and should NOT be mapped to ASP
-
-    # Glutamic acid protonation states (heavy atoms identical)
-    'GLH': 'GLU',  # protonated glutamic acid (neutral COOH)
-    'GLUP': 'GLU', # alternative protonated form
-    'GLUH': 'GLU', # alternative protonated form
-
-    # Lysine protonation states (heavy atoms identical)
-    'LYN': 'LYS',  # deprotonated lysine (neutral amine)
-    'LYSN': 'LYS', # alternative deprotonated lysine
-
-    # Arginine protonation states (heavy atoms identical)
-    'ARN': 'ARG',  # deprotonated arginine (neutral, rare)
-
-    # Tyrosine protonation states (heavy atoms identical)
-    'TYM': 'TYR',  # deprotonated tyrosine (tyrosinate anion)
-    'TYN': 'TYR',  # alternative deprotonated tyrosine
-
-    # Serine protonation states (heavy atoms identical)
-    'SER-': 'SER', # deprotonated serine
-
-    # Threonine protonation states (heavy atoms identical)
-    'THR-': 'THR', # deprotonated threonine
-
-    # Tryptophan protonation states (heavy atoms identical)
-    'TRP-': 'TRP', # deprotonated tryptophan
-
-    # Modified amino acids (commonly found in X-ray structures and PTMs)
-    'MSE': 'MET',  # Selenomethionine (Se replaces S, very common in X-ray crystallography)
-    'SEP': 'SER',  # Phosphoserine (post-translational modification)
-    'TPO': 'THR',  # Phosphothreonine (post-translational modification)
-    'PTR': 'TYR',  # Phosphotyrosine (post-translational modification)
-    'HYP': 'PRO',  # Hydroxyproline (common in collagen)
-    'MLY': 'LYS',  # N-dimethyllysine (post-translational modification)
-    'M3L': 'LYS',  # N-trimethyllysine (post-translational modification)
-    'ALY': 'LYS',  # N-acetyllysine (post-translational modification)
-    'CSO': 'CYS',  # S-hydroxycysteine (oxidized cysteine)
-    'CSS': 'CYS',  # S-mercaptocysteine (disulfide-bonded)
-    'CME': 'CYS',  # S-methylcysteine
-    'OCS': 'CYS',  # Cysteinesulfonic acid (oxidized)
-    'MEN': 'ASN',  # N-methylasparagine
-    'FME': 'MET',  # N-formylmethionine (translation initiation)
-
-    # N-terminal and C-terminal variants
-    'ACE': 'ACE',  # acetylated N-terminus (keep as is for HETATM)
-    'NME': 'NME',  # N-methylated C-terminus (keep as is for HETATM)
-    'NH2': 'NH2',  # amidated C-terminus (keep as is for HETATM)
-}
+from ..constants import (
+    STANDARD_ATOMS,
+    STANDARD_ATOMS_PTM,
+    RESIDUE_NAME_MAPPING,
+    PTM_RESIDUES,
+    NUCLEIC_ACID_RESIDUES,
+)
 
 
 class PDBStandardizer:
@@ -172,9 +57,11 @@ class PDBStandardizer:
                 f"Must be one of: {', '.join(valid_modes)}"
             )
 
-        self.standard_atoms = STANDARD_ATOMS
+        # Use centralized constants (combine standard + PTM atoms for preserve mode)
+        self.standard_atoms = {**STANDARD_ATOMS, **STANDARD_ATOMS_PTM}
         self.nucleic_acid_residues = NUCLEIC_ACID_RESIDUES
         self.residue_name_mapping = RESIDUE_NAME_MAPPING
+        self.ptm_residues = PTM_RESIDUES
 
     def _normalize_residue_name(self, res_name: str) -> str:
         """
@@ -193,15 +80,7 @@ class PDBStandardizer:
             # Don't map PTM residues, keep original names
             # Still map protonation states to standard names (HID→HIS, CYX→CYS)
             # PTMs are those that would map but have different chemical structure
-            ptm_residues = {
-                'SEP', 'TPO', 'PTR',  # Phosphorylation
-                'MSE',  # Selenomethionine
-                'HYP',  # Hydroxyproline
-                'MLY', 'M3L', 'ALY',  # Methylation/Acetylation
-                'CSO', 'CSS', 'CME', 'OCS',  # Cysteine modifications
-                'MEN', 'FME'  # Other modifications
-            }
-            if res_name in ptm_residues:
+            if res_name in self.ptm_residues:
                 return res_name  # Keep PTM name
             else:
                 return self.residue_name_mapping.get(res_name, res_name)
@@ -286,15 +165,7 @@ class PDBStandardizer:
 
         # Handle PTM removal if requested
         if self.ptm_handling == 'remove':
-            ptm_residues = {
-                'SEP', 'TPO', 'PTR',  # Phosphorylation
-                'MSE',  # Selenomethionine
-                'HYP',  # Hydroxyproline
-                'MLY', 'M3L', 'ALY',  # Methylation/Acetylation
-                'CSO', 'CSS', 'CME', 'OCS',  # Cysteine modifications
-                'MEN', 'FME'  # Other modifications
-            }
-            if res_name in ptm_residues:
+            if res_name in self.ptm_residues:
                 return
 
         # Normalize residue name to standard amino acid

@@ -13,6 +13,8 @@ import numpy as np
 
 from .pdb_standardizer import PDBStandardizer
 from .residue_featurizer import ResidueFeaturizer
+from .pdb_utils import calculate_sidechain_centroid
+from ..constants import MAX_ATOMS_PER_RESIDUE, NUM_RESIDUE_TYPES
 
 
 class ProteinFeaturizer:
@@ -71,37 +73,35 @@ class ProteinFeaturizer:
         self.num_residues = len(self.residues)
 
         # Build coordinate tensor
-        self.coords = torch.zeros(self.num_residues, 15, 3)
+        self.coords = torch.zeros(self.num_residues, MAX_ATOMS_PER_RESIDUE, 3)
         self.residue_types = torch.from_numpy(
             np.array(self.residues)[:, 2].astype(int)
         )
 
         for idx, residue in enumerate(self.residues):
-            residue_coord_series = self._featurizer.get_residue_coordinates(residue)
-
             # For unknown residues (type 20), only use backbone + CB atoms
             res_type = residue[2]
             if res_type == 20:  # UNK residue
-                # Standard backbone atoms + CB
+                # Need pandas lookup for atom name filtering
+                residue_coord_series = self._featurizer.get_residue_coordinates(residue)
                 standard_unk_atoms = ['N', 'CA', 'C', 'O', 'CB']
                 filtered_coords = []
                 for atom_name in standard_unk_atoms:
                     if atom_name in residue_coord_series.index:
                         filtered_coords.append(residue_coord_series[atom_name])
                     else:
-                        # Atom missing, use zero coordinates
-                        filtered_coords.append([0.0, 0.0, 0.0])
-                residue_coord = torch.as_tensor(filtered_coords)
+                        filtered_coords.append(np.array([0.0, 0.0, 0.0]))
+                residue_coord_np = np.vstack(filtered_coords).astype(np.float32)
             else:
-                residue_coord = torch.as_tensor(residue_coord_series.tolist())
+                # Use cached coordinates (O(1) lookup instead of pandas xs)
+                residue_coord_np = self._featurizer.get_residue_coordinates_numpy(residue)
 
+            residue_coord = torch.from_numpy(residue_coord_np)
             self.coords[idx, :residue_coord.shape[0], :] = residue_coord
-            # Sidechain centroid
-            if residue_coord.shape[0] > 4:
-                self.coords[idx, -1, :] = residue_coord[4:, :].mean(0)
-            else:
-                # No sidechain atoms, use CA position as fallback
-                self.coords[idx, -1, :] = residue_coord[1, :] if residue_coord.shape[0] > 1 else torch.zeros(3)
+            # Sidechain centroid (using unified calculate_sidechain_centroid)
+            self.coords[idx, -1, :] = torch.from_numpy(
+                calculate_sidechain_centroid(residue_coord_np)
+            )
 
         # Extract CA and SC coordinates
         self.coords_CA = self.coords[:, 1:2, :]
@@ -121,8 +121,10 @@ class ProteinFeaturizer:
             Dictionary with residue types and one-hot encoding
         """
         if 'sequence' not in self._cache:
+            # Bounds checking for one-hot encoding
+            residue_types_clamped = torch.clamp(self.residue_types, 0, NUM_RESIDUE_TYPES - 1)
             residue_one_hot = torch.nn.functional.one_hot(
-                self.residue_types, num_classes=21
+                residue_types_clamped, num_classes=NUM_RESIDUE_TYPES
             )
 
             self._cache['sequence'] = {
@@ -384,7 +386,6 @@ class ProteinFeaturizer:
 
         if cache_key not in self._cache:
             from .atom_featurizer import AtomFeaturizer
-            import numpy as np
             from scipy.spatial import distance_matrix
 
             atom_featurizer = AtomFeaturizer()
@@ -448,9 +449,8 @@ class ProteinFeaturizer:
 
         return self._cache[cache_key]
 
-    # Alias for consistency
+    # Primary alias for atom-level graph
     get_atom_features = get_atom_graph
-    get_atom_level_graph = get_atom_graph
 
     def get_atom_tokens_and_coords(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -471,7 +471,7 @@ class ProteinFeaturizer:
             self._cache['atom_tokens_coords'] = (token, coord)
         return self._cache['atom_tokens_coords']
 
-    # Aliases for clarity
+    # Alias
     get_atom_tokens = get_atom_tokens_and_coords
 
     def get_atom_features_with_sasa(self) -> Dict[str, Any]:
@@ -491,10 +491,8 @@ class ProteinFeaturizer:
             self._cache['atom_features_sasa'] = features
         return self._cache['atom_features_sasa']
 
-    # Aliases for clarity
+    # Alias
     get_atom_sasa = get_atom_features_with_sasa
-    get_atom_level_features_with_sasa = get_atom_features_with_sasa
-    get_atom_level_sasa = get_atom_features_with_sasa
 
     def get_atom_coordinates(self) -> torch.Tensor:
         """
@@ -516,43 +514,23 @@ class ProteinFeaturizer:
         token, coord = self.get_atom_tokens_and_coords()
         return token
 
-    # ============== RESIDUE-LEVEL FEATURES ==============
-    # Adding clearer aliases for residue-level methods
+    # ============== RESIDUE-LEVEL ALIASES ==============
+    # Cleaner aliases - removed redundant _level_ variants
 
-    # Sequence features
+    # Sequence
     get_residue_sequence = get_sequence_features
-    get_residue_types = get_sequence_features
-    get_residue_level_sequence = get_sequence_features
 
-    # Geometric features
+    # Geometry
     get_residue_geometry = get_geometric_features
-    get_residue_dihedrals = get_geometric_features
-    get_residue_level_geometry = get_geometric_features
 
-    # SASA features
+    # SASA
     get_residue_sasa = get_sasa_features
-    get_residue_level_sasa = get_sasa_features
 
     # Contact map
     get_residue_contacts = get_contact_map
-    get_residue_contact_map = get_contact_map
-    get_residue_level_contacts = get_contact_map
 
-    # Node features
-    get_residue_node_features = get_node_features
-    get_residue_level_node_features = get_node_features
-
-    # Edge features
-    get_residue_edge_features = get_edge_features
-    get_residue_level_edge_features = get_edge_features
-
-    # Standard features (residue-level by default)
+    # Graph features
     get_residue_features = get_features
-    get_residue_level_features = get_features
-
-    # All features
-    get_all_residue_features = get_all_features
-    get_residue_level_all_features = get_all_features
 
     # ============== SEQUENCE FEATURES ==============
 

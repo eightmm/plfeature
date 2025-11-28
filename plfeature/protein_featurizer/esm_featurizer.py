@@ -222,66 +222,29 @@ class ESMFeaturizer:
         pdb_path: Union[str, Path],
         chain_id: Optional[str] = None,
     ) -> str:
-        """Extract sequence from PDB file."""
-        from ..constants import AMINO_ACID_3TO1
+        """
+        Extract sequence from PDB file.
 
-        sequence = []
-        seen_residues = set()
+        Uses PDBParser for consistent parsing across all featurizers.
+        """
+        from .pdb_utils import PDBParser
 
-        with open(pdb_path, 'r') as f:
-            for line in f:
-                if not line.startswith('ATOM'):
-                    continue
-
-                current_chain = line[21].strip()
-                if chain_id and current_chain != chain_id:
-                    continue
-
-                res_name = line[17:20].strip()
-                res_num = line[22:26].strip()
-                key = (current_chain, res_num)
-
-                if key in seen_residues:
-                    continue
-                seen_residues.add(key)
-
-                aa = AMINO_ACID_3TO1.get(res_name, 'X')
-                sequence.append(aa)
-
-        return ''.join(sequence)
+        parser = PDBParser(str(pdb_path))
+        return parser.get_sequence(chain_id=chain_id)
 
     def _get_sequences_by_chain(
         self,
         pdb_path: Union[str, Path],
     ) -> Dict[str, str]:
-        """Extract sequences for each chain from PDB file."""
-        from ..constants import AMINO_ACID_3TO1
+        """
+        Extract sequences for each chain from PDB file.
 
-        chains = {}
-        seen_residues = {}
+        Uses PDBParser for consistent parsing across all featurizers.
+        """
+        from .pdb_utils import PDBParser
 
-        with open(pdb_path, 'r') as f:
-            for line in f:
-                if not line.startswith('ATOM'):
-                    continue
-
-                chain_id = line[21].strip()
-                res_name = line[17:20].strip()
-                res_num = line[22:26].strip()
-                key = (chain_id, res_num)
-
-                if chain_id not in chains:
-                    chains[chain_id] = []
-                    seen_residues[chain_id] = set()
-
-                if key in seen_residues[chain_id]:
-                    continue
-                seen_residues[chain_id].add(key)
-
-                aa = AMINO_ACID_3TO1.get(res_name, 'X')
-                chains[chain_id].append(aa)
-
-        return {k: ''.join(v) for k, v in chains.items()}
+        parser = PDBParser(str(pdb_path))
+        return parser.get_sequence_by_chain()
 
 
 class DualESMFeaturizer:
