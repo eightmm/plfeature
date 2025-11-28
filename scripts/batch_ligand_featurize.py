@@ -9,6 +9,7 @@ Usage:
     python scripts/batch_ligand_featurize.py --input_dir /data/ligands --output_dir /data/ligand-features
     python scripts/batch_ligand_featurize.py --input_dir /data/ligands --output_dir /data/ligand-features --num_workers 4
     python scripts/batch_ligand_featurize.py --input_dir /data/ligands --output_dir /data/ligand-features --resume
+    python scripts/batch_ligand_featurize.py --input_dir /data/ligands --output_dir /data/ligand-features --graph_only
 """
 
 import argparse
@@ -126,9 +127,18 @@ def process_single_ligand(
     input_dir: str,
     output_dir: str,
     add_hydrogens: bool = True,
+    graph_only: bool = False,
 ) -> Tuple[str, bool, str]:
     """
     Process a single ligand, trying multiple file formats if needed.
+
+    Args:
+        ligand_id: Unique identifier for the ligand
+        file_paths: List of file paths to try loading from
+        input_dir: Input directory root
+        output_dir: Output directory root
+        add_hydrogens: Whether to add hydrogens
+        graph_only: If True, only extract graph features (no descriptors/fingerprints)
 
     Returns:
         Tuple of (ligand_id, success, message)
@@ -159,23 +169,11 @@ def process_single_ligand(
         # Initialize featurizer with molecule
         featurizer = MoleculeFeaturizer(mol, hydrogen=add_hydrogens)
 
-        # Extract features
-        features = featurizer.get_feature()
+        # Extract graph features
         node, edge, adj = featurizer.get_graph()
 
         # Build save dictionary
         save_dict = {
-            # Molecular descriptors and fingerprints
-            'descriptor': features['descriptor'],           # [40]
-            'maccs': features['maccs'],                     # [167]
-            'morgan': features['morgan'],                   # [2048]
-            'morgan_counts': features['morgan_counts'],     # [2048]
-            'rdkit_fp': features['rdkit_fp'],               # [2048]
-            'atom_pair': features['atom_pair'],             # [2048]
-            'topological_torsion': features['topological_torsion'],  # [2048]
-            'pattern': features['pattern'],                 # [2048]
-            'layered': features['layered'],                 # [2048]
-
             # Graph features
             'node_feats': node['node_feats'],               # [N_atoms, 157]
             'edge_feats': edge['edge_feats'],               # [N_edges, 66]
@@ -191,12 +189,29 @@ def process_single_ligand(
             'ligand_id': ligand_id,
             'source_path': str(loaded_from),
             'source_format': loaded_from.suffix,
+            'graph_only': graph_only,
         }
+
+        # Add molecular descriptors and fingerprints if not graph_only
+        if not graph_only:
+            features = featurizer.get_feature()
+            save_dict.update({
+                'descriptor': features['descriptor'],           # [40]
+                'maccs': features['maccs'],                     # [167]
+                'morgan': features['morgan'],                   # [2048]
+                'morgan_counts': features['morgan_counts'],     # [2048]
+                'rdkit_fp': features['rdkit_fp'],               # [2048]
+                'atom_pair': features['atom_pair'],             # [2048]
+                'topological_torsion': features['topological_torsion'],  # [2048]
+                'pattern': features['pattern'],                 # [2048]
+                'layered': features['layered'],                 # [2048]
+            })
 
         # Save
         torch.save(save_dict, output_path)
 
-        return (ligand_id, True, f"ok ({featurizer.num_atoms} atoms, {loaded_from.suffix})")
+        mode_str = "graph" if graph_only else "all"
+        return (ligand_id, True, f"ok ({featurizer.num_atoms} atoms, {loaded_from.suffix}, {mode_str})")
 
     except Exception as e:
         return (ligand_id, False, str(e)[:100])
@@ -235,9 +250,17 @@ def main():
         '--no_hydrogens', action='store_true',
         help='Do not add hydrogens to molecules'
     )
+    parser.add_argument(
+        '--graph_only', action='store_true',
+        help='Extract only graph features (no descriptors/fingerprints)'
+    )
     args = parser.parse_args()
 
     add_hydrogens = not args.no_hydrogens
+    graph_only = args.graph_only
+
+    if graph_only:
+        logger.info("Mode: graph_only (skipping descriptors and fingerprints)")
 
     # Find all ligand files
     logger.info(f"Scanning {args.input_dir} for ligand files...")
@@ -287,7 +310,8 @@ def main():
         with tqdm(ligand_list, desc="Processing", unit="ligand") as pbar:
             for ligand_id, file_paths in pbar:
                 lid, success, msg = process_single_ligand(
-                    ligand_id, file_paths, args.input_dir, args.output_dir, add_hydrogens
+                    ligand_id, file_paths, args.input_dir, args.output_dir,
+                    add_hydrogens, graph_only
                 )
 
                 if success:
@@ -302,7 +326,7 @@ def main():
         logger.info(f"Using {args.num_workers} workers")
 
         tasks = [
-            (lid, files, args.input_dir, args.output_dir, add_hydrogens)
+            (lid, files, args.input_dir, args.output_dir, add_hydrogens, graph_only)
             for lid, files in ligand_list
         ]
 
