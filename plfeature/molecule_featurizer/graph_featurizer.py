@@ -8,9 +8,12 @@ for molecular graph representations.
 import warnings
 import numpy as np
 import torch
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 from rdkit.Chem import rdMolDescriptors, rdPartialCharges, AllChem
 from typing import Dict, Tuple
+
+# Suppress RDKit C++ warnings (e.g., "Molecule does not have explicit Hs")
+RDLogger.DisableLog('rdApp.*')
 
 from ..constants import (
     ATOM_TYPES, PERIODS, GROUPS, DEGREES, HEAVY_DEGREES, VALENCES,
@@ -63,6 +66,8 @@ class MoleculeGraphFeaturizer:
             k: Chem.MolFromSmarts(v) for k, v in CHEMICAL_SMARTS.items()
         }
         self._rotatable_pattern = Chem.MolFromSmarts(ROTATABLE_BOND_SMARTS)
+        # Cache for per-molecule computed values
+        self._cache = {}
 
     # =========================================================================
     # Utility Methods
@@ -87,6 +92,54 @@ class MoleculeGraphFeaturizer:
         if clip:
             result = max(0.0, min(1.0, result))
         return result
+
+    def _clear_cache(self):
+        """Clear the per-molecule cache."""
+        self._cache = {}
+
+    def _get_gasteiger_charges(self, mol) -> dict:
+        """
+        Compute and cache Gasteiger partial charges.
+
+        Returns:
+            Dictionary mapping atom index to charge value (clipped to [-1, 1])
+        """
+        cache_key = 'gasteiger_charges'
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        charges = {}
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            rdPartialCharges.ComputeGasteigerCharges(mol)
+
+        for atom in mol.GetAtoms():
+            idx = atom.GetIdx()
+            try:
+                charge = float(atom.GetProp('_GasteigerCharge'))
+                if np.isnan(charge) or np.isinf(charge):
+                    charge = 0.0
+            except:
+                charge = 0.0
+            charges[idx] = max(-1.0, min(1.0, charge))
+
+        self._cache[cache_key] = charges
+        return charges
+
+    def _get_distance_matrix(self, mol) -> np.ndarray:
+        """
+        Compute and cache distance matrix.
+
+        Returns:
+            numpy array of shape [num_atoms, num_atoms]
+        """
+        cache_key = 'distance_matrix'
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        dm = Chem.GetDistanceMatrix(mol)
+        self._cache[cache_key] = dm
+        return dm
 
     # =========================================================================
     # Ring Analysis
@@ -258,20 +311,10 @@ class MoleculeGraphFeaturizer:
         num_atoms = mol.GetNumAtoms()
         features = torch.zeros(num_atoms, 2)
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            rdPartialCharges.ComputeGasteigerCharges(mol)
+        # Use cached charges
+        charges = self._get_gasteiger_charges(mol)
 
-        for atom in mol.GetAtoms():
-            idx = atom.GetIdx()
-            try:
-                charge = float(atom.GetProp('_GasteigerCharge'))
-                if np.isnan(charge):
-                    charge = 0.0
-            except:
-                charge = 0.0
-
-            charge = max(-1.0, min(1.0, charge))
+        for idx, charge in charges.items():
             features[idx, 0] = (charge + 1.0) / 2.0
             features[idx, 1] = abs(charge)
 
@@ -296,17 +339,8 @@ class MoleculeGraphFeaturizer:
         hetero_symbols = {'N', 'O', 'S'}
         halogen_symbols = {'F', 'Cl', 'Br', 'I'}
 
-        # Precompute partial charges
-        try:
-            rdPartialCharges.ComputeGasteigerCharges(mol)
-            charges = {}
-            for atom in mol.GetAtoms():
-                charge = atom.GetDoubleProp('_GasteigerCharge')
-                if np.isnan(charge) or np.isinf(charge):
-                    charge = 0.0
-                charges[atom.GetIdx()] = max(-1.0, min(1.0, charge))
-        except:
-            charges = {atom.GetIdx(): 0.0 for atom in mol.GetAtoms()}
+        # Use cached charges
+        charges = self._get_gasteiger_charges(mol)
 
         def compute_hop_features(neighbors: list) -> list:
             """Compute 8 features for a set of neighbors."""
@@ -480,7 +514,8 @@ class MoleculeGraphFeaturizer:
         if num_atoms == 1:
             return features
 
-        dm = Chem.GetDistanceMatrix(mol)
+        # Use cached distance matrix
+        dm = self._get_distance_matrix(mol)
         norm = NORM_CONSTANTS
 
         # Identify special atoms
@@ -711,15 +746,17 @@ class MoleculeGraphFeaturizer:
         try:
             mol_copy = Chem.RWMol(mol)
             mol_copy = mol_copy.GetMol()
-            AllChem.EmbedMolecule(mol_copy, randomSeed=42, useRandomCoords=True)
-            if mol_copy.GetNumConformers() > 0:
-                AllChem.UFFOptimizeMolecule(mol_copy, maxIters=200)
-                conf = mol_copy.GetConformer(0)
-                coords = []
-                for i in range(num_atoms):
-                    pos = conf.GetAtomPosition(i)
-                    coords.append([pos.x, pos.y, pos.z])
-                return torch.tensor(coords, dtype=torch.float32)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                AllChem.EmbedMolecule(mol_copy, randomSeed=42, useRandomCoords=True)
+                if mol_copy.GetNumConformers() > 0:
+                    AllChem.UFFOptimizeMolecule(mol_copy, maxIters=200)
+                    conf = mol_copy.GetConformer(0)
+                    coords = []
+                    for i in range(num_atoms):
+                        pos = conf.GetAtomPosition(i)
+                        coords.append([pos.x, pos.y, pos.z])
+                    return torch.tensor(coords, dtype=torch.float32)
         except:
             pass
 
@@ -865,8 +902,8 @@ class MoleculeGraphFeaturizer:
             matches = mol.GetSubstructMatches(self._rotatable_pattern)
             rotatable_atoms = set(sum(matches, ()))
 
-        # Precompute distance matrix for topological features
-        dm = Chem.GetDistanceMatrix(mol) if num_atoms > 1 else None
+        # Use cached distance matrix for topological features
+        dm = self._get_distance_matrix(mol) if num_atoms > 1 else None
 
         # Precompute atom properties for pair features
         atom_props = self._precompute_atom_properties(mol)
@@ -1086,8 +1123,14 @@ class MoleculeGraphFeaturizer:
             - edge_dict: {'edges': [2, E], 'edge_feats': [E, 66]}
             - adjacency_matrix: [N, N, 66]
         """
-        node_features, coords = self.get_atom_features(mol)
-        bond_features = self.get_bond_features(mol)
+        # Clear cache for new molecule
+        self._clear_cache()
+
+        # Suppress RDKit warnings (e.g., "Molecule does not have explicit Hs")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            node_features, coords = self.get_atom_features(mol)
+            bond_features = self.get_bond_features(mol)
 
         # Extract edge list from adjacency
         src, dst = torch.where(bond_features.sum(dim=-1) > 0)
