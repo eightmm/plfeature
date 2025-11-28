@@ -284,7 +284,7 @@ class AtomFeaturizer:
         min_len = min(orig_token_len, orig_sasa_len, orig_element_len)
 
         if not (orig_token_len == orig_sasa_len == orig_element_len):
-            logger.debug(
+            logger.warning(
                 f"Atom count mismatch in {pdb_file}: "
                 f"tokens={orig_token_len}, SASA={orig_sasa_len}, elements={orig_element_len}. "
                 f"Truncating to {min_len} atoms."
