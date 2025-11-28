@@ -69,9 +69,9 @@ featurizer = HierarchicalFeaturizer()
 # Extract all features
 data = featurizer.featurize("protein.pdb")
 
-# Atom-level (one-hot encoded)
-atom_tokens = data.atom_tokens           # [N_atom, 187]
-atom_elements = data.atom_elements       # [N_atom, 8]
+# Atom-level (integer indices for nn.Embedding)
+atom_tokens = data.atom_tokens           # [N_atom] - indices 0-186
+atom_elements = data.atom_elements       # [N_atom] - indices 0-7
 atom_coords = data.atom_coords           # [N_atom, 3]
 
 # Residue-level
@@ -157,7 +157,7 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 ## 📊 Feature Overview
 
 ### Molecules
-- **Descriptors**: 40 normalized molecular properties → [Details](docs/molecular_descriptors.md)
+- **Descriptors**: 40 normalized molecular properties → [Details](docs/molecule_feature.md)
 - **Fingerprints**: 9 types including Morgan, MACCS, RDKit → [Details](docs/molecule_feature.md)
 - **Graph Features**: 157D atom features, 66D bond features → [Details](docs/molecule_graph.md)
 
@@ -170,8 +170,8 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 ### Proteins
 - **Atom Features**: 187 token types with atomic SASA → [Details](docs/protein_atom_feature.md)
 - **Residue Features**: Geometry, SASA, contacts, secondary structure → [Details](docs/protein_residue_feature.md)
-- **Hierarchical Features**: Atom-residue attention with ESM embeddings → [Details](docs/hierarchical_featurizer.md)
-  - Atom-level: 187 tokens (one-hot), 8 elements, 22 residue types
+- **Hierarchical Features**: Atom-residue attention with ESM embeddings → [Details](docs/protein_hierarchical_featurizer.md)
+  - Atom-level: 187 tokens (integer indices), 8 elements, 22 residue types
   - Residue-level: 76-dim scalar + 31x3 vector features
   - ESM embeddings: ESMC (1152-dim) + ESM3 (1536-dim) with BOS/EOS tokens
 - **Graph Representations**: Both atom and residue-level networks
@@ -333,12 +333,11 @@ python test_ptm_handling.py     # Test PTM handling modes (base_aa, preserve, re
 ## 📖 Documentation
 
 - **[Feature Types Overview](docs/feature_types.md)** - Quick overview of all features
-- **[Molecular Descriptors & Fingerprints](docs/molecule_feature.md)** - Molecular features guide
+- **[Molecule Features](docs/molecule_feature.md)** - Descriptors & fingerprints guide
 - **[Molecule Graph Features](docs/molecule_graph.md)** - Graph representations for molecules
-- **[Protein Residue Features](docs/protein_residue_feature.md)** - Residue-level features guide
 - **[Protein Atom Features](docs/protein_atom_feature.md)** - Atom-level features guide
-- **[Hierarchical Featurizer with ESM](docs/hierarchical_featurizer.md)** - ESM embeddings for proteins
-- **[Molecular Descriptors Reference](docs/molecular_descriptors.md)** - Complete descriptor reference
+- **[Protein Residue Features](docs/protein_residue_feature.md)** - Residue-level features guide
+- **[Protein Hierarchical Features](docs/protein_hierarchical_featurizer.md)** - ESM embeddings for proteins
 
 ## 📄 License
 
