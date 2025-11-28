@@ -53,7 +53,7 @@ def get_output_path(pdb_path: Path, input_dir: str, output_dir: str) -> Path:
 
 def standardize_pdb_to_tmp(
     pdb_path: Path,
-    ptm_handling: str = 'base_aa',
+    ptm_handling: str = 'unk',
     remove_hydrogens: bool = True
 ) -> str:
     """
@@ -173,7 +173,7 @@ def process_single_file_shared_featurizer(
     output_dir: str,
     featurizer: HierarchicalFeaturizer,
     standardize: bool = False,
-    ptm_handling: str = 'base_aa',
+    ptm_handling: str = 'unk',
     standardizer: Optional[PDBStandardizer] = None
 ) -> Tuple[str, bool, str]:
     """
@@ -270,9 +270,9 @@ def main():
     parser.add_argument('--esm3_model', type=str, default='esm3-open', help='ESM3 model name')
     parser.add_argument('--device', type=str, default='cuda', help='Device for ESM models')
     parser.add_argument('--standardize', action='store_true', help='Standardize PDB files before featurization')
-    parser.add_argument('--ptm_handling', type=str, default='base_aa',
-                        choices=['base_aa', 'preserve', 'remove'],
-                        help='PTM handling mode (default: base_aa)')
+    parser.add_argument('--ptm_handling', type=str, default='unk',
+                        choices=['base_aa', 'unk', 'preserve', 'remove'],
+                        help='PTM handling mode (default: unk)')
     args = parser.parse_args()
 
     # Find all protein files
