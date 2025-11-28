@@ -682,6 +682,9 @@ class MoleculeGraphFeaturizer:
         """
         Extract or generate 3D coordinates.
 
+        If coordinates exist, uses them directly.
+        If not and generate_if_missing=True, generates on a copy (doesn't modify input mol).
+
         Args:
             mol: RDKit mol object
             generate_if_missing: Whether to generate coordinates if not present
@@ -691,6 +694,7 @@ class MoleculeGraphFeaturizer:
         """
         num_atoms = mol.GetNumAtoms()
 
+        # If coordinates exist, use them
         if mol.GetNumConformers() > 0:
             conf = mol.GetConformer(0)
             coords = []
@@ -699,14 +703,18 @@ class MoleculeGraphFeaturizer:
                 coords.append([pos.x, pos.y, pos.z])
             return torch.tensor(coords, dtype=torch.float32)
 
+        # No coordinates exist
         if not generate_if_missing:
             return torch.zeros((num_atoms, 3), dtype=torch.float32)
 
+        # Generate coordinates on a copy to avoid modifying original
         try:
-            AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
-            if mol.GetNumConformers() > 0:
-                AllChem.UFFOptimizeMolecule(mol, maxIters=200)
-                conf = mol.GetConformer(0)
+            mol_copy = Chem.RWMol(mol)
+            mol_copy = mol_copy.GetMol()
+            AllChem.EmbedMolecule(mol_copy, randomSeed=42, useRandomCoords=True)
+            if mol_copy.GetNumConformers() > 0:
+                AllChem.UFFOptimizeMolecule(mol_copy, maxIters=200)
+                conf = mol_copy.GetConformer(0)
                 coords = []
                 for i in range(num_atoms):
                     pos = conf.GetAtomPosition(i)

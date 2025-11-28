@@ -150,17 +150,21 @@ class MoleculeFeaturizer:
         for old_idx, new_idx in enumerate(ranks):
             new_order[new_idx] = old_idx
         # Renumber atoms (this also reorders coordinates if present)
-        return Chem.RenumberAtoms(mol, new_order)
+        new_mol = Chem.RenumberAtoms(mol, new_order)
+        # Ensure ring info is initialized after renumbering
+        Chem.FastFindRings(new_mol)
+        return new_mol
 
     @staticmethod
     def _prepare_mol(
         mol_or_smiles: Union[str, Chem.Mol],
-        add_hs: bool = True,
+        add_hs: bool = False,
         canonicalize: bool = True
     ) -> Chem.Mol:
         """
         Prepare molecule from SMILES string or RDKit mol object.
 
+        Always creates a copy to avoid modifying the original molecule.
         Preserves 3D coordinates when adding hydrogens if the molecule has a conformer.
 
         Args:
@@ -179,7 +183,11 @@ class MoleculeFeaturizer:
             if mol is None:
                 raise ValueError(f"Invalid SMILES: {mol_or_smiles}")
         else:
-            mol = mol_or_smiles
+            # Always copy to avoid modifying original
+            mol = Chem.RWMol(mol_or_smiles)
+            mol = mol.GetMol()
+            # Ensure ring info is initialized after copy
+            Chem.FastFindRings(mol)
 
         # Canonicalize BEFORE adding hydrogens for consistent ordering
         if canonicalize and mol is not None:
